@@ -1,0 +1,39 @@
+{
+  "name": "cafe",
+  "version": "0.1.0",
+  "description": "Slack Random Coffee bot hosted locally with Docker, Node.js, and SQLite.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:scheduling-ui": "tsx src/localSchedulingServer.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@slack/bolt": "^4.4.0",
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^17.2.3",
+    "googleapis": "^144.0.0",
+    "luxon": "^3.7.2",
+    "pino": "^10.1.0",
+    "typebox": "^1.1.39",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

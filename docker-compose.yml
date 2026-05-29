@@ -1,0 +1,15 @@
+services:
+  cafe:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/cafe.sqlite
+      PI_CODING_AGENT_DIR: /root/.pi/agent
+    volumes:
+      - cafe-data:/data
+      - ${HOME}/.pi/agent:/root/.pi/agent:ro
+
+volumes:
+  cafe-data:

@@ -1,0 +1,94 @@
+# Operations
+
+## Environment
+
+Copy `.env.example` to `.env` and fill required values:
+
+```env
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-level-token
+ADMIN_USER_IDS=U01234567
+DATABASE_PATH=/data/cafe.sqlite
+LOG_LEVEL=info
+SCHEDULER_INTERVAL_SECONDS=60
+MAX_PARTICIPANTS=200
+MATCH_CANDIDATE_ATTEMPTS=200
+MAX_REMINDERS_PER_MATCH=2
+CALENDAR_SCHEDULING_ENABLED=false
+PI_PROVIDER=deepseek
+PI_MODEL=deepseek-v4-flash
+```
+
+Schedule settings are configured by admins from Slack App Home and persisted in SQLite. Calendar-assisted scheduling is disabled by default and can be enabled with `CALENDAR_SCHEDULING_ENABLED=true` after Pi and Google Calendar credentials are configured.
+
+Valid schedule values:
+
+- first pairing date/time: local ISO-8601 without offset, e.g. `2026-06-03T10:00`
+- frequency: `weekly` or `biweekly`
+- timezone: IANA timezone, e.g. `Europe/Berlin`
+- reminder delay: positive integer days less than the pairing interval
+
+## Local development
+
+```bash
+npm install
+npm run dev
+```
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+The compose file mounts a persistent Docker volume at `/data` and mounts `${HOME}/.pi/agent` read-only at `/root/.pi/agent` so the embedded Pi scheduling agent can reuse configured model credentials.
+
+## Shutdown
+
+The app handles `SIGINT` and `SIGTERM`, stops the scheduler, stops the Slack app, and closes SQLite.
+
+## Rollback
+
+1. Stop the container:
+
+```bash
+docker compose down
+```
+
+2. Keep the `cafe-data` volume to preserve state, or remove it to reset:
+
+```bash
+docker volume rm cafe_cafe-data
+```
+
+Slack DMs already sent remain visible in Slack. To roll back calendar-assisted scheduling without removing data, set `CALENDAR_SCHEDULING_ENABLED=false`; existing scheduling rows become inert while existing Random Coffee reminders continue.
+
+## Calendar-assisted scheduling
+
+Optional calendar scheduling uses:
+
+```env
+CALENDAR_SCHEDULING_ENABLED=true
+CALENDAR_PROVIDER=google
+GOOGLE_CALENDAR_CREDENTIALS_PATH=/run/secrets/google-calendar.json
+GOOGLE_CALENDAR_SUBJECT=calendar-bot@example.com
+CALENDAR_BOT_CALENDAR_ID=calendar-bot@example.com
+CALENDAR_AGENT_FALLBACK_MODE=manual
+```
+
+The Google adapter needs free/busy read access for opted-in participants and write access to the bot-owned calendar. The bot reads only free/busy intervals, not private event titles or descriptions. Calendar events are created only after both participants accept the same active slot and the final availability check passes.
+
+If the Pi agent is unavailable, `CALENDAR_AGENT_FALLBACK_MODE` controls behavior:
+
+- `manual`: switch the pair to manual scheduling.
+- `failed`: mark scheduling failed while leaving the coffee match active.
+
+## Security/operational notes
+
+- Use Socket Mode for local hosting; do not expose unnecessary HTTP receivers.
+- Do not commit `.env`.
+- Logs redact Slack tokens/secrets and omit full raw Slack payloads.
+- Do not log Google credentials, provider tokens, raw calendar payloads, or private calendar event metadata.
+- SQLite writes use parameterized statements.
+- Slack channel membership is paginated.
+- Notification jobs persist sent/pending/failed state so retries do not duplicate successful sends.
