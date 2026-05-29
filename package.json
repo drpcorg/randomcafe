@@ -4,6 +4,7 @@
   "description": "Slack Random Coffee bot hosted locally with Docker, Node.js, and SQLite.",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "dev:scheduling-ui": "tsx src/localSchedulingServer.ts",
