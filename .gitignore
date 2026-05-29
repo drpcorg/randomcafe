@@ -5,4 +5,8 @@ coverage/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+# Local Google/service-account credentials
+*service-account*.json
+*-service-account.json
+drpc-*.json
 .DS_Store

@@ -48,6 +48,7 @@ function localRuntimeConfig(): RuntimeConfig {
     databasePath: ':memory:',
     logLevel: 'silent',
     schedulerIntervalSeconds: 60,
+    schedulingPlanningConcurrency: envInt('SCHEDULING_PLANNING_CONCURRENCY', 4),
     maxParticipants: 200,
     matchCandidateAttempts: 200,
     maxRemindersPerMatch: 2,

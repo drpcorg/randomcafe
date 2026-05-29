@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Logger } from 'pino';
+import { mapWithConcurrency } from '../asyncQueue.js';
 import { defaultSchedulingPreference, type CalendarService, type SchedulingParticipantProfile } from '../calendar/service.js';
 import type { MatchRecord, RuntimeConfig, SchedulingCandidateSlot, SchedulingNotificationType, SchedulingRequest, SchedulingResponseType } from '../types.js';
 import { SchedulingAgent, type SchedulingRecommendation } from './agent.js';
@@ -33,7 +34,7 @@ export class SchedulingCoordinator {
 
   constructor(
     private readonly store: SchedulingStore,
-    private readonly config: RuntimeConfig,
+    readonly config: RuntimeConfig,
     private readonly calendar: CalendarService,
     private readonly logger: Logger,
     environment?: SchedulingEnvironment,
@@ -49,12 +50,11 @@ export class SchedulingCoordinator {
 
   async processPendingRequests(timestamp = nowIso()): Promise<number> {
     if (!this.config.calendarSchedulingEnabled) return 0;
-    let processed = 0;
-    for (const request of this.store.listSchedulingRequestsByStatus(['pending'], 20)) {
+    const requests = this.store.listSchedulingRequestsByStatus(['pending'], 100);
+    await mapWithConcurrency(requests, this.config.schedulingPlanningConcurrency, async (request) => {
       await this.planRequest(request, 'initial', timestamp);
-      processed += 1;
-    }
-    return processed;
+    });
+    return requests.length;
   }
 
   async handleParticipantResponse(input: SchedulingResponseInput, timestamp = nowIso()): Promise<SchedulingRequest | null> {

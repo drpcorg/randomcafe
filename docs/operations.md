@@ -11,6 +11,7 @@ ADMIN_USER_IDS=U01234567
 DATABASE_PATH=/data/cafe.sqlite
 LOG_LEVEL=info
 SCHEDULER_INTERVAL_SECONDS=60
+SCHEDULING_PLANNING_CONCURRENCY=4
 MAX_PARTICIPANTS=200
 MATCH_CANDIDATE_ATTEMPTS=200
 MAX_REMINDERS_PER_MATCH=2
@@ -76,7 +77,11 @@ CALENDAR_BOT_CALENDAR_ID=calendar-bot@example.com
 CALENDAR_AGENT_FALLBACK_MODE=manual
 ```
 
-The Google adapter needs free/busy read access for opted-in participants and write access to the bot-owned calendar. The bot reads only free/busy intervals, not private event titles or descriptions. Calendar events are created only after both participants accept the same active slot and the final availability check passes.
+The Google adapter needs free/busy read access for opted-in participants and write access to the bot-owned calendar. If a pending scheduling request has no explicit calendar identity yet, the Slack host refreshes the participant profile and provisions calendar/invite identity from the Slack email before planning. Users must share their Google Calendar with the bot service account using `See only free/busy (hide details)`, or the configured Google credentials must otherwise have free/busy access.
+
+Pending scheduling requests are planned in parallel up to `SCHEDULING_PLANNING_CONCURRENCY`. SQLite runs in WAL mode with a busy timeout, and related provisioning writes are grouped in transactions.
+
+The bot reads only free/busy intervals, not private event titles or descriptions. Calendar events are created only after both participants select overlapping proposed slots and the final availability check passes.
 
 If the Pi agent is unavailable, `CALENDAR_AGENT_FALLBACK_MODE` controls behavior:
 

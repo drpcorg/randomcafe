@@ -32,6 +32,7 @@ export interface RuntimeConfig {
   databasePath: string;
   logLevel: string;
   schedulerIntervalSeconds: number;
+  schedulingPlanningConcurrency: number;
   maxParticipants: number;
   matchCandidateAttempts: number;
   maxRemindersPerMatch: number;

@@ -38,7 +38,9 @@ Slack manifests cannot embed local icon files, so upload the PNG manually after 
 
 ## Calendar-assisted scheduling
 
-Optional scheduling can use Pi (`deepseek-v4-flash` by default) plus Google Calendar free/busy to propose meeting slots. The bot only creates a bot-owned calendar event after both participants accept the same active slot. Either participant can switch a pair to manual mode; reminders still continue.
+Optional scheduling can use Pi (`deepseek-v4-flash` by default) plus Google Calendar free/busy to propose meeting slots. Before planning pending matches, the Slack host refreshes participant calendar identity from Slack profile email when no explicit calendar identity exists yet. Users still need to share their Google Calendar with the bot service account using `See only free/busy` access, or the Google account must otherwise be visible to the configured credentials.
+
+The bot proposes three equal slot options, lets each participant select every option that works, and creates a bot-owned calendar event only when their selections overlap. Either participant can switch a pair to manual mode; reminders still continue.
 
 Keep `CALENDAR_SCHEDULING_ENABLED=false` for the original pairing-only behavior.
 

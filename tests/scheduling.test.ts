@@ -7,6 +7,7 @@ import { createLogger } from '../src/logger.js';
 import { SchedulingCoordinator } from '../src/scheduling.js';
 import { SchedulingAgent } from '../src/schedulingAgent.js';
 import { processSchedulingNotificationJobs } from '../src/slack/schedulingNotifications.js';
+import { provisionCalendarIdentitiesForPendingScheduling } from '../src/slack/calendarProvisioning.js';
 import { ACTION_SCHEDULE_ACCEPT, parseSchedulingActionValue, schedulingProposalBlocks } from '../src/slack/schedulingMessages.js';
 import type { RuntimeConfig } from '../src/types.js';
 
@@ -17,6 +18,7 @@ const runtimeConfig: RuntimeConfig = {
   databasePath: ':memory:',
   logLevel: 'silent',
   schedulerIntervalSeconds: 60,
+  schedulingPlanningConcurrency: 4,
   maxParticipants: 200,
   matchCandidateAttempts: 200,
   maxRemindersPerMatch: 2,
@@ -143,6 +145,24 @@ describe('calendar slot search', () => {
 });
 
 describe('scheduling repository and coordinator', () => {
+  it('provisions pending scheduling identities from Slack profile email before planning', async () => {
+    const { db, repository, match, coordinator } = setup();
+    coordinator.createRequestForMatch(match);
+    const client = {
+      users: {
+        info: vi.fn(async ({ user }: { user: string }) => ({ user: { id: user, profile: { email: `${user.toLowerCase()}@example.com` } } })),
+      },
+    };
+
+    const provisioned = await provisionCalendarIdentitiesForPendingScheduling(client, repository, runtimeConfig, createLogger('silent'), '2026-06-01T08:00:00Z');
+
+    expect(provisioned).toBe(2);
+    expect(repository.getCalendarIdentity('U1')?.calendarId).toBe('u1@example.com');
+    expect(repository.getVerifiedInviteAddress('U2')?.email).toBe('u2@example.com');
+    expect(repository.getSchedulingPreference('U1')?.automatedSchedulingEnabled).toBe(true);
+    db.close();
+  });
+
   it('books exactly one event after both participants accept the same active slot', async () => {
     const { db, repository, match, coordinator } = setup();
     connect(repository, 'U1');

@@ -3,9 +3,10 @@ import type { CafeRepository } from './db.js';
 import { processDueCycles, type CycleProcessorClient } from './cycles.js';
 import type { SchedulingCoordinator } from './scheduling.js';
 import { processDueReminderRows, processNotificationJobs, type SlackMessageClientLike } from './slack/notifications.js';
+import { provisionCalendarIdentitiesForPendingScheduling, type SlackCalendarProvisioningClientLike } from './slack/calendarProvisioning.js';
 import { processSchedulingNotificationJobs } from './slack/schedulingNotifications.js';
 
-export type SchedulerClient = CycleProcessorClient & SlackMessageClientLike;
+export type SchedulerClient = CycleProcessorClient & SlackMessageClientLike & SlackCalendarProvisioningClientLike;
 
 export class CafeScheduler {
   private timer: NodeJS.Timeout | null = null;
@@ -40,13 +41,14 @@ export class CafeScheduler {
     this.running = true;
     try {
       const cycleResult = await processDueCycles(this.client, this.repository, this.logger, timestamp, this.schedulingCoordinator);
+      const schedulingIdentitiesProvisioned = this.schedulingCoordinator ? await provisionCalendarIdentitiesForPendingScheduling(this.client, this.repository, this.schedulingCoordinator.config, this.logger, timestamp) : 0;
       const schedulingRequestsProcessed = this.schedulingCoordinator ? await this.schedulingCoordinator.processPendingRequests(timestamp) : 0;
       const schedulingExpired = this.schedulingCoordinator ? this.schedulingCoordinator.expireSchedulingForClosedMatches(timestamp) : 0;
       const remindersEnqueued = await processDueReminderRows(this.repository, timestamp);
       const notificationsSent = await processNotificationJobs(this.client, this.repository, this.logger, timestamp);
       const schedulingNotificationsSent = this.schedulingCoordinator ? await processSchedulingNotificationJobs(this.client, this.repository, this.logger, timestamp) : 0;
-      if (cycleResult.created || cycleResult.failed || schedulingRequestsProcessed || schedulingExpired || remindersEnqueued || notificationsSent || schedulingNotificationsSent) {
-        this.logger.info({ cycleResult, schedulingRequestsProcessed, schedulingExpired, remindersEnqueued, notificationsSent, schedulingNotificationsSent }, 'Scheduler tick processed work');
+      if (cycleResult.created || cycleResult.failed || schedulingIdentitiesProvisioned || schedulingRequestsProcessed || schedulingExpired || remindersEnqueued || notificationsSent || schedulingNotificationsSent) {
+        this.logger.info({ cycleResult, schedulingIdentitiesProvisioned, schedulingRequestsProcessed, schedulingExpired, remindersEnqueued, notificationsSent, schedulingNotificationsSent }, 'Scheduler tick processed work');
       }
     } finally {
       this.running = false;
