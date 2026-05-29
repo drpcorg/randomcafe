@@ -9,7 +9,7 @@ The system SHALL maintain the calendar identity and scheduling preferences neede
 
 If a participant has no saved scheduling preferences, the system SHALL use safe defaults: 30-minute meetings, a 7-day search horizon, 24 hours minimum notice, and weekdays 10:00-17:00 in the configured coffee timezone unless runtime configuration overrides those defaults.
 
-The system SHALL read calendar availability only for participants who have both a verified calendar identity and automated scheduling enabled. The system SHALL maintain a verified invite address for calendar invitations; the invite address MAY come from the connected calendar identity or from a verified Slack email address. The system SHALL NOT require a participant to connect a calendar in order to remain eligible for Random Coffee matching.
+The system SHALL read calendar availability only for participants who have both a verified calendar identity and automated scheduling enabled. The system SHALL maintain a verified invite address for calendar invitations; the invite address MAY come from the connected calendar identity or from a verified Slack email address. Before planning pending Slack-hosted scheduling requests, the Slack adapter SHALL refresh participant profile data and, when no explicit calendar identity exists, provision calendar identity, invite address, and default scheduling preferences from the participant's Slack profile email. The system SHALL NOT require a participant to connect a calendar in order to remain eligible for Random Coffee matching.
 
 #### Scenario: Participant has scheduling identity
 - **WHEN** a participant has a verified calendar identity, saved scheduling preferences, and automated scheduling enabled
@@ -30,6 +30,10 @@ The system SHALL read calendar availability only for participants who have both 
 #### Scenario: Participant has no saved scheduling preferences
 - **WHEN** a participant without saved scheduling preferences enters a scheduling request
 - **THEN** the system SHALL apply the configured default duration, search horizon, minimum notice, and preferred weekday window for planning
+
+#### Scenario: Slack profile email provisions scheduling identity
+- **WHEN** a pending Slack-hosted scheduling request involves a participant with a Slack profile email and no saved calendar identity
+- **THEN** the system SHALL save that email as the participant's calendar identity and invite address, and SHALL create default scheduling preferences before attempting calendar-backed planning
 
 ### Requirement: New matches start a scheduling request when scheduling is available
 The system SHALL create a scheduling request for each newly created Random Coffee match when calendar-assisted scheduling is globally enabled. The scheduling request SHALL be tracked separately from the match outcome so scheduling can be booked, manual, failed, or expired while the match remains active for reminders and feedback.
@@ -57,13 +61,13 @@ Automated calendar-backed planning SHALL begin only when at least one participan
 - **THEN** the system SHALL use the existing Random Coffee notification and reminder behavior without creating a scheduling request
 
 ### Requirement: Scheduling agent proposes calendar-backed slots
-The system SHALL use a Pi scheduling agent to recommend a primary meeting slot and optional alternatives for a scheduling request. The scheduling agent SHALL use `deepseek-v4-flash` by default through configurable Pi provider/model settings and SHALL be limited to application-provided scheduling tools.
+The system SHALL use a Pi scheduling agent to recommend up to three equal meeting slot options for a scheduling request. The scheduling agent SHALL use `deepseek-v4-flash` by default through configurable Pi provider/model settings and SHALL be limited to application-provided scheduling tools.
 
-The scheduling agent SHALL only propose slots that were returned by the calendar slot-finding service for the current scheduling request.
+The scheduling agent SHALL only propose slots that were returned by the calendar slot-finding service for the current scheduling request. When participant notes, non-overlapping selections, alternatives requests, or calendar availability changes cause a new proposal, the scheduling agent SHALL explain in participant-facing text why the new options are being proposed.
 
 #### Scenario: Shared availability exists
 - **WHEN** both participants have verified calendar access with automated scheduling enabled and at least one shared slot satisfies their constraints
-- **THEN** the system SHALL send a Slack scheduling proposal containing a primary slot and MAY include alternative slots
+- **THEN** the system SHALL send a Slack scheduling proposal containing up to three equal slot options
 
 #### Scenario: Only one participant has calendar access
 - **WHEN** exactly one participant in a match has verified calendar access with automated scheduling enabled
@@ -82,11 +86,19 @@ The scheduling agent SHALL only propose slots that were returned by the calendar
 - **THEN** the system SHALL follow the configured agent fallback mode: switch the scheduling request to manual or mark the scheduling request as failed, while keeping the Random Coffee match active
 
 ### Requirement: Participants respond to scheduling proposals in Slack
-The system SHALL let each participant respond to a proposed slot from Slack. Supported responses SHALL include accepting the proposed slot, requesting alternatives, rejecting with a reason, providing free-text scheduling preferences for the current request, and switching to manual mode.
+The system SHALL let each participant respond to proposed slots from Slack. Supported responses SHALL include selecting one to three proposed slots that work for them, requesting alternatives, rejecting with a reason, providing free-text scheduling preferences for the current request, and switching to manual mode.
 
-#### Scenario: Participant accepts proposed slot
-- **WHEN** a participant accepts a proposed slot
-- **THEN** the system SHALL record that participant's acceptance for the slot and SHALL wait for the other participant unless both participants have accepted the same slot
+#### Scenario: Participant selects proposed slots
+- **WHEN** a participant selects one or more proposed slots as acceptable
+- **THEN** the system SHALL record that participant's acceptable slot set and SHALL wait for the other participant unless both participants have selected at least one overlapping slot
+
+#### Scenario: Participants select overlapping slots
+- **WHEN** both participants select acceptable slot sets with at least one slot in common
+- **THEN** the system SHALL choose an overlapping active slot for booking
+
+#### Scenario: Participants select non-overlapping slots
+- **WHEN** both participants select acceptable slot sets but no selected slot overlaps
+- **THEN** the system SHALL reject the current proposed set, keep the request proposed, and ask the scheduling agent to propose a fresh set of options with an explanation
 
 #### Scenario: Participant requests alternatives
 - **WHEN** a participant requests other options
@@ -128,28 +140,28 @@ The system SHALL allow either participant in a matched pair to switch the schedu
 - **THEN** the system SHALL continue the normal Random Coffee reminder and feedback flow for that match
 
 ### Requirement: Agreement creates a bot-owned calendar event
-The system SHALL create a calendar event from the bot's calendar only after both participants have accepted the same slot. Before creating the event, the system SHALL revalidate that the accepted slot is still free for every participant with verified calendar access.
+The system SHALL create a calendar event from the bot's calendar only after both participants have selected at least one overlapping active proposed slot. Before creating the event, the system SHALL revalidate that the selected overlapping slot is still free for every participant with verified calendar access.
 
-The event SHALL invite both participants using verified invite addresses and SHALL be associated with the scheduling request. Calendar event creation SHALL be idempotent for the accepted slot.
+The event SHALL invite both participants using verified invite addresses and SHALL be associated with the scheduling request. Calendar event creation SHALL be idempotent for the accepted overlapping slot.
 
-#### Scenario: Both participants accept the same available slot
-- **WHEN** both participants accept the same proposed slot, both participants have verified invite addresses, and the final availability check confirms the slot is still free for every participant with verified calendar access
+#### Scenario: Both participants select an overlapping available slot
+- **WHEN** both participants select acceptable proposed slots, at least one selected slot overlaps, both participants have verified invite addresses, and the final availability check confirms the overlapping slot is still free for every participant with verified calendar access
 - **THEN** the system SHALL create one bot-owned calendar event for the coffee meeting and SHALL persist the provider event identifier
 
 #### Scenario: Accepted participant lacks invite address
-- **WHEN** both participants accept the same proposed slot but either participant has no verified invite address
+- **WHEN** both participants select an overlapping proposed slot but either participant has no verified invite address
 - **THEN** the system SHALL NOT create a calendar event, SHALL switch the scheduling request to manual mode, and SHALL notify both participants to arrange directly
 
 #### Scenario: Accepted slot is no longer available
-- **WHEN** both participants accept the same proposed slot but the final availability check shows that the slot is no longer free for a participant with verified calendar access
+- **WHEN** both participants select an overlapping proposed slot but the final availability check shows that the slot is no longer free for a participant with verified calendar access
 - **THEN** the system SHALL NOT create a calendar event and SHALL attempt to propose a new available slot
 
 #### Scenario: Event creation is retried after restart
 - **WHEN** the application restarts after accepting a slot but before confirming event creation
 - **THEN** the system SHALL retry idempotently and SHALL NOT create duplicate calendar events for the same scheduling request and slot
 
-#### Scenario: Participants accept concurrently
-- **WHEN** both participants accept the same active slot at nearly the same time
+#### Scenario: Participants select concurrently
+- **WHEN** both participants select overlapping active slots at nearly the same time
 - **THEN** the system SHALL serialize consensus detection and event creation so at most one bot-owned calendar event is created
 
 #### Scenario: Calendar event is created
@@ -202,7 +214,7 @@ The system SHALL persist scheduling requests, candidate slots, participant respo
 - **THEN** the system SHALL preserve the booked status and provider event identifier and SHALL NOT create another event for that request
 
 ### Requirement: Scheduling failures are safe and visible
-The system SHALL handle calendar, Slack, and Pi agent failures without corrupting Random Coffee match state. Retryable notification failures SHALL preserve the current scheduling status and retry notification delivery. Unrecoverable planning failures SHALL transition the scheduling request according to the configured fallback mode: manual or failed. In all cases, the system SHALL leave the match active for normal reminders and feedback unless the match itself reaches a terminal outcome.
+The system SHALL handle calendar, Slack, and Pi agent failures without corrupting Random Coffee match state. Retryable notification failures SHALL preserve the current scheduling status and retry notification delivery. Unrecoverable planning failures SHALL transition the scheduling request according to the configured fallback mode: manual or failed. Pending scheduling planning MAY run concurrently up to a configured concurrency limit, and database writes SHALL be serialized or guarded by SQLite WAL/busy-timeout and transactions so concurrent planning cannot corrupt scheduling state. In all cases, the system SHALL leave the match active for normal reminders and feedback unless the match itself reaches a terminal outcome.
 
 #### Scenario: Calendar availability lookup fails
 - **WHEN** the system cannot read required calendar availability for a scheduling request and no retry or partial-availability proposal is available
