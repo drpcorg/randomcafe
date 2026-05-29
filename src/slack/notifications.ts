@@ -10,6 +10,7 @@ export interface SlackMessageClientLike {
   };
   chat: {
     postMessage(args: { channel: string; text: string; blocks?: unknown[] }): Promise<{ channel?: string; ts?: string }>;
+    update?(args: { channel: string; ts: string; text: string; blocks?: unknown[] }): Promise<{ channel?: string; ts?: string }>;
   };
 }
 

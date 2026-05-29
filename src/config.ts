@@ -40,7 +40,7 @@ const runtimeEnvSchema = z.object({
   CALENDAR_BOT_CALENDAR_ID: z.string().optional(),
   CALENDAR_DEFAULT_DURATION_MINUTES: z.coerce.number().int().positive().default(30),
   CALENDAR_SEARCH_HORIZON_DAYS: z.coerce.number().int().positive().default(7),
-  CALENDAR_MINIMUM_NOTICE_HOURS: z.coerce.number().int().nonnegative().default(24),
+  CALENDAR_MINIMUM_NOTICE_HOURS: z.coerce.number().int().nonnegative().default(0),
   CALENDAR_DEFAULT_PREFERRED_START: z.string().regex(timeOfDay).default('10:00'),
   CALENDAR_DEFAULT_PREFERRED_END: z.string().regex(timeOfDay).default('17:00'),
   CALENDAR_AGENT_FALLBACK_MODE: z.enum(['manual', 'failed']).default('manual'),

@@ -241,13 +241,27 @@ export class SchedulingCoordinator {
       await this.planRequest(request, 'accepted-slot-stale', timestamp);
       return;
     }
-    const event = await this.calendar.createBotOwnedEvent({
-      requestId: request.id,
-      slot,
-      participants: profiles,
-      summary: '☕ Random Coffee',
-      description: 'Random Coffee scheduled by Cafe bot.',
-    });
+    let event;
+    try {
+      event = await this.calendar.createBotOwnedEvent({
+        requestId: request.id,
+        slot,
+        participants: profiles,
+        summary: '☕ Random Coffee',
+        description: 'Random Coffee scheduled by Cafe bot.',
+      });
+    } catch (error) {
+      const message = `Calendar event creation failed: ${error instanceof Error ? error.message : String(error)}`;
+      this.logger.error({ err: error, requestId: request.id, slotId: slot.id }, 'Calendar event creation failed after overlapping slot acceptance');
+      if (this.config.calendarAgentFallbackMode === 'failed') {
+        this.store.markSchedulingFailed(request.id, message, timestamp);
+        await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:event-create:${dedupeSuffix()}`);
+      } else {
+        this.store.markSchedulingManual(request.id, message, timestamp, slot.id);
+        await this.notifyParticipants(request.id, 'manual', slot.id, `manual:${request.id}:event-create:${dedupeSuffix()}`);
+      }
+      return;
+    }
     this.store.markSchedulingBooked(request.id, slot.id, event.providerEventId, event.providerEventUrl ?? null, timestamp);
     await this.notifyParticipants(request.id, 'booked', slot.id, `booked:${request.id}:${slot.id}`);
   }

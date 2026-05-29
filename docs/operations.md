@@ -42,7 +42,9 @@ npm run dev
 docker compose up --build
 ```
 
-The compose file mounts a persistent Docker volume at `/data` and mounts `${HOME}/.pi/agent` read-only at `/root/.pi/agent` so the embedded Pi scheduling agent can reuse configured model credentials.
+The compose file bind-mounts local `./data` at `/data`, mounts the relative host path from `GOOGLE_CALENDAR_CREDENTIALS_PATH` at `/run/secrets/google-calendar-credentials.json`, and mounts `${HOME}/.pi/agent` read-only at `/root/.pi/agent` so the embedded Pi scheduling agent can reuse configured model credentials.
+
+Run only one Slack Socket Mode consumer for the app token. Before switching between local `npm run dev` and Docker, stop the other process/container; duplicate consumers can split Slack interactive envelopes and cause delayed retries even when each process acknowledges quickly.
 
 ## Shutdown
 
@@ -56,11 +58,7 @@ The app handles `SIGINT` and `SIGTERM`, stops the scheduler, stops the Slack app
 docker compose down
 ```
 
-2. Keep the `cafe-data` volume to preserve state, or remove it to reset:
-
-```bash
-docker volume rm cafe_cafe-data
-```
+2. Keep local `./data/cafe.sqlite` to preserve state, or remove the local database files to reset.
 
 Slack DMs already sent remain visible in Slack. To roll back calendar-assisted scheduling without removing data, set `CALENDAR_SCHEDULING_ENABLED=false`; existing scheduling rows become inert while existing Random Coffee reminders continue.
 
@@ -77,7 +75,12 @@ CALENDAR_BOT_CALENDAR_ID=calendar-bot@example.com
 CALENDAR_AGENT_FALLBACK_MODE=manual
 ```
 
-The Google adapter needs free/busy read access for opted-in participants and write access to the bot-owned calendar. If a pending scheduling request has no explicit calendar identity yet, the Slack host refreshes the participant profile and provisions calendar/invite identity from the Slack email before planning. Users must share their Google Calendar with the bot service account using `See only free/busy (hide details)`, or the configured Google credentials must otherwise have free/busy access.
+The Google adapter uses the same service-account credentials in two modes:
+
+- free/busy reads use Domain-Wide Delegation with `GOOGLE_CALENDAR_SUBJECT` and only `https://www.googleapis.com/auth/calendar.freebusy` authorized in Google Admin;
+- event writes use the service account without impersonation and `https://www.googleapis.com/auth/calendar.events` to create final coffee events in `CALENDAR_BOT_CALENDAR_ID`.
+
+Share `CALENDAR_BOT_CALENDAR_ID` with the service-account email using `Make changes to events` so the bot can write there. If a pending scheduling request has no explicit calendar identity yet, the Slack host refreshes the participant profile and provisions calendar/invite identity from the Slack email before planning. Users outside the delegated domain must share their Google Calendar with the bot service account using `See only free/busy (hide details)`, or the configured Google credentials must otherwise have free/busy access.
 
 Pending scheduling requests are planned in parallel up to `SCHEDULING_PLANNING_CONCURRENCY`. SQLite runs in WAL mode with a busy timeout, and related provisioning writes are grouped in transactions.
 

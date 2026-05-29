@@ -5,9 +5,9 @@ Define calendar-assisted scheduling for Random Coffee matches, including partici
 
 ## Requirements
 ### Requirement: Participants can connect scheduling identity and preferences
-The system SHALL maintain the calendar identity and scheduling preferences needed to plan Random Coffee meetings for each participant. Preferences SHALL include meeting duration, preferred availability windows, minimum notice, and whether automated scheduling is enabled for that participant.
+The system SHALL maintain the calendar identity and scheduling preferences needed to plan Random Coffee meetings for each participant. Preferences SHALL include meeting duration, preferred availability windows, preferred weekdays, minimum notice, and whether automated scheduling is enabled for that participant.
 
-If a participant has no saved scheduling preferences, the system SHALL use safe defaults: 30-minute meetings, a 7-day search horizon, 24 hours minimum notice, and weekdays 10:00-17:00 in the configured coffee timezone unless runtime configuration overrides those defaults.
+If a participant has no saved scheduling preferences, the system SHALL use safe defaults: 30-minute meetings, a 7-day search horizon, 0 hours minimum notice so same-day slots are allowed, and Monday-Friday 10:00-17:00 in the configured coffee timezone unless runtime configuration overrides those defaults.
 
 The system SHALL read calendar availability only for participants who have both a verified calendar identity and automated scheduling enabled. The system SHALL maintain a verified invite address for calendar invitations; the invite address MAY come from the connected calendar identity or from a verified Slack email address. Before planning pending Slack-hosted scheduling requests, the Slack adapter SHALL refresh participant profile data and, when no explicit calendar identity exists, provision calendar identity, invite address, and default scheduling preferences from the participant's Slack profile email. The system SHALL NOT require a participant to connect a calendar in order to remain eligible for Random Coffee matching.
 
@@ -24,16 +24,26 @@ The system SHALL read calendar availability only for participants who have both 
 - **THEN** the system SHALL NOT read that participant's calendar availability for future scheduling requests while the setting remains disabled
 
 #### Scenario: Participant updates scheduling preferences
-- **WHEN** a participant updates their meeting duration, preferred windows, minimum notice, or automated scheduling setting
+- **WHEN** a participant updates their meeting duration, preferred time window, preferred weekdays, minimum notice, or automated scheduling setting
 - **THEN** the system SHALL persist the updated preferences for future scheduling requests
 
 #### Scenario: Participant has no saved scheduling preferences
 - **WHEN** a participant without saved scheduling preferences enters a scheduling request
-- **THEN** the system SHALL apply the configured default duration, search horizon, minimum notice, and preferred weekday window for planning
+- **THEN** the system SHALL apply the configured default duration, search horizon, minimum notice, preferred weekdays, and preferred time window for planning
 
 #### Scenario: Slack profile email provisions scheduling identity
 - **WHEN** a pending Slack-hosted scheduling request involves a participant with a Slack profile email and no saved calendar identity
 - **THEN** the system SHALL save that email as the participant's calendar identity and invite address, and SHALL create default scheduling preferences before attempting calendar-backed planning
+
+#### Scenario: Participant views Home scheduling status
+- **WHEN** a participant opens Slack App Home and calendar-assisted scheduling is enabled
+- **THEN** the system SHALL show what calendar identity, invite email, automated scheduling setting, preferred time window, preferred weekdays, weekly booked/busy preview, and calendar privacy boundary the bot will use
+- **AND** when the calendar can be read, the weekly booked/busy preview SHALL show every busy interval returned by the calendar provider without intentionally truncating per-day entries
+- **AND** when the calendar is not connected or cannot be read, the system SHALL show the preferred weekly window and setup instructions instead of failing the Home view
+
+#### Scenario: Participant edits preferred time, days, and notice
+- **WHEN** a participant updates preferred start/end times, preferred weekdays, or minimum notice from Slack App Home
+- **THEN** the system SHALL save those preferences and use them for future scheduling slot generation
 
 ### Requirement: New matches start a scheduling request when scheduling is available
 The system SHALL create a scheduling request for each newly created Random Coffee match when calendar-assisted scheduling is globally enabled. The scheduling request SHALL be tracked separately from the match outcome so scheduling can be booked, manual, failed, or expired while the match remains active for reminders and feedback.
@@ -88,9 +98,24 @@ The scheduling agent SHALL only propose slots that were returned by the calendar
 ### Requirement: Participants respond to scheduling proposals in Slack
 The system SHALL let each participant respond to proposed slots from Slack. Supported responses SHALL include selecting one to three proposed slots that work for them, requesting alternatives, rejecting with a reason, providing free-text scheduling preferences for the current request, and switching to manual mode.
 
+The Slack adapter SHALL acknowledge interactive payloads immediately before calendar, Pi, booking, or other long-running work. After a terminal or replacement action, the adapter SHALL remove controls from the acted-on proposal message and deliver any new proposal or final status as a separate Slack message. A production deployment SHALL run at most one active Socket Mode consumer for a Slack app token so interactive envelopes are not split between competing bot processes.
+
 #### Scenario: Participant selects proposed slots
 - **WHEN** a participant selects one or more proposed slots as acceptable
 - **THEN** the system SHALL record that participant's acceptable slot set and SHALL wait for the other participant unless both participants have selected at least one overlapping slot
+
+#### Scenario: Participant confirms immediately after changing checkbox selection
+- **WHEN** Slack sends a Confirm action whose embedded checkbox state conflicts with the latest checkbox action observed for the same participant and scheduling request
+- **THEN** the Slack adapter SHALL use the latest observed checkbox action as the participant's selected slot set
+
+#### Scenario: Slack interactive action is acknowledged promptly
+- **WHEN** a participant clicks Confirm, Other options, Suggest time, Manual mode, or changes the proposed-slot checkbox selection
+- **THEN** the Slack adapter SHALL send the Slack acknowledgement before doing long-running planning, booking, notification delivery, or calendar work
+- **AND** the system SHOULD log enough timing information to distinguish delayed Slack delivery from slow application acknowledgement without logging raw Slack payloads
+
+#### Scenario: Deployment has duplicate Socket Mode consumers
+- **WHEN** another process or container is already connected to Slack Socket Mode for the same app token
+- **THEN** the deployment SHALL stop the duplicate consumer before accepting production interactions so Slack can deliver each interactive envelope to exactly one active bot process
 
 #### Scenario: Participants select overlapping slots
 - **WHEN** both participants select acceptable slot sets with at least one slot in common
@@ -142,7 +167,7 @@ The system SHALL allow either participant in a matched pair to switch the schedu
 ### Requirement: Agreement creates a bot-owned calendar event
 The system SHALL create a calendar event from the bot's calendar only after both participants have selected at least one overlapping active proposed slot. Before creating the event, the system SHALL revalidate that the selected overlapping slot is still free for every participant with verified calendar access.
 
-The event SHALL invite both participants using verified invite addresses and SHALL be associated with the scheduling request. Calendar event creation SHALL be idempotent for the accepted overlapping slot.
+The event SHALL invite both participants using verified invite addresses and SHALL be associated with the scheduling request. Calendar event creation SHALL be idempotent for the accepted overlapping slot. Google free/busy reads SHOULD use only the delegated `calendar.freebusy` scope, while bot-owned event creation SHOULD use the non-impersonated service-account identity with event-write access only to the bot calendar.
 
 #### Scenario: Both participants select an overlapping available slot
 - **WHEN** both participants select acceptable proposed slots, at least one selected slot overlaps, both participants have verified invite addresses, and the final availability check confirms the overlapping slot is still free for every participant with verified calendar access

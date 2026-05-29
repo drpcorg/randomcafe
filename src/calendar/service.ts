@@ -16,11 +16,15 @@ export interface SchedulingParticipantProfile {
   preference: SchedulingPreference;
 }
 
-export interface FindCalendarSlotsInput {
-  requestId: number;
+export interface FindCalendarBusyInput {
   participants: SchedulingParticipantProfile[];
   timezone: string;
   now?: string;
+  horizonDays?: number;
+}
+
+export interface FindCalendarSlotsInput extends FindCalendarBusyInput {
+  requestId: number;
   rejectedSlotIds?: Set<string>;
 }
 
@@ -47,6 +51,7 @@ export interface CalendarService {
   resolveAvailabilityIdentity(slackUserId: string): Promise<CalendarIdentity | null>;
   resolveInviteAddress(slackUserId: string): Promise<VerifiedInviteAddress | null>;
   findSharedSlots(input: FindCalendarSlotsInput): Promise<Array<Omit<SchedulingCandidateSlot, 'requestId' | 'createdAt' | 'status'>>>;
+  findBusyIntervals(input: FindCalendarBusyInput): Promise<Map<string, BusyInterval[]>>;
   revalidateSlot(input: RevalidateSlotInput): Promise<boolean>;
   createBotOwnedEvent(input: CreateCalendarEventInput): Promise<CreatedCalendarEvent>;
 }
@@ -59,6 +64,7 @@ export function defaultSchedulingPreference(slackUserId: string, config: Runtime
     minNoticeHours: config.calendarMinimumNoticeHours,
     preferredStart: config.calendarDefaultPreferredStart,
     preferredEnd: config.calendarDefaultPreferredEnd,
+    preferredWeekdays: [1, 2, 3, 4, 5],
     automatedSchedulingEnabled: true,
     updatedAt,
   };
@@ -99,13 +105,17 @@ export function generateSharedSlots(input: SlotSearchInput): Array<Omit<Scheduli
   const minNoticeHours = Math.max(...preferences.map((pref) => pref.minNoticeHours));
   const preferredStart = preferences.map((pref) => parseTime(pref.preferredStart)).sort((a, b) => minutesOf(a) - minutesOf(b)).at(-1)!;
   const preferredEnd = preferences.map((pref) => parseTime(pref.preferredEnd)).sort((a, b) => minutesOf(a) - minutesOf(b))[0]!;
+  const preferredWeekdays = preferences
+    .map((pref) => new Set((pref.preferredWeekdays.length > 0 ? pref.preferredWeekdays : [1, 2, 3, 4, 5]).filter((day) => day >= 1 && day <= 7)))
+    .reduce((intersection, current) => new Set([...intersection].filter((day) => current.has(day))));
+  if (preferredWeekdays.size === 0) return [];
   const earliest = now.plus({ hours: minNoticeHours });
   const slots: Array<Omit<SchedulingCandidateSlot, 'requestId' | 'createdAt' | 'status'>> = [];
   const maxResults = input.maxResults ?? 80;
 
   for (let dayOffset = 0; dayOffset < searchHorizonDays && slots.length < maxResults * 4; dayOffset += 1) {
     const day = now.setZone(input.timezone).startOf('day').plus({ days: dayOffset });
-    if (day.weekday > 5) continue;
+    if (!preferredWeekdays.has(day.weekday)) continue;
 
     let cursor = day.set({ hour: preferredStart.hour, minute: preferredStart.minute, second: 0, millisecond: 0 });
     const windowEnd = day.set({ hour: preferredEnd.hour, minute: preferredEnd.minute, second: 0, millisecond: 0 });
@@ -151,6 +161,7 @@ export abstract class RepositoryBackedCalendarService implements CalendarService
   }
 
   abstract findSharedSlots(input: FindCalendarSlotsInput): Promise<Array<Omit<SchedulingCandidateSlot, 'requestId' | 'createdAt' | 'status'>>>;
+  abstract findBusyIntervals(input: FindCalendarBusyInput): Promise<Map<string, BusyInterval[]>>;
   abstract revalidateSlot(input: RevalidateSlotInput): Promise<boolean>;
   abstract createBotOwnedEvent(input: CreateCalendarEventInput): Promise<CreatedCalendarEvent>;
 }

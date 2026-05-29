@@ -24,41 +24,48 @@ export function parseSchedulingActionValue(value: string): { requestId: number; 
   }
 }
 
-function formatSlot(slot: SchedulingCandidateSlot | null | undefined): string {
+export function formatSlot(slot: SchedulingCandidateSlot | null | undefined, timezone: string): string {
   if (!slot) return 'No slot selected';
-  const starts = DateTime.fromISO(slot.startsAt, { zone: 'utc' }).setZone('local').toFormat('ccc, dd LLL HH:mm');
-  const ends = DateTime.fromISO(slot.endsAt, { zone: 'utc' }).setZone('local').toFormat('HH:mm');
-  return `${starts}–${ends}`;
+  const starts = DateTime.fromISO(slot.startsAt, { zone: 'utc' }).setZone(timezone).toFormat('ccc, dd LLL HH:mm');
+  const ends = DateTime.fromISO(slot.endsAt, { zone: 'utc' }).setZone(timezone).toFormat('HH:mm');
+  return `${starts}–${ends} ${timezone}`;
 }
 
-function formatSlotButton(slot: SchedulingCandidateSlot, index: number): string {
-  const starts = DateTime.fromISO(slot.startsAt, { zone: 'utc' }).setZone('local').toFormat('ccc HH:mm');
+function formatSlotButton(slot: SchedulingCandidateSlot, index: number, timezone: string): string {
+  const starts = DateTime.fromISO(slot.startsAt, { zone: 'utc' }).setZone(timezone).toFormat('ccc HH:mm');
   return `✅ ${index + 1}. ${starts}`;
 }
 
-export function schedulingProposalBlocks(request: SchedulingRequest, slots: SchedulingCandidateSlot[]): unknown[] {
+export function schedulingProposalBlocks(request: SchedulingRequest, slots: SchedulingCandidateSlot[], partnerUserId?: string | null, timezone = 'UTC', explanation?: string | null): unknown[] {
   const proposed = slots.slice(0, 3);
+  const partnerText = partnerUserId ? `Your coffee match: <@${partnerUserId}>\n` : '';
+  const explanationText = explanation?.trim() ? `_${explanation.trim()}_\n` : '';
   const slotText = proposed.length > 0
-    ? proposed.map((candidate, index) => `${index + 1}. *${formatSlot(candidate)}*`).join('\n')
+    ? proposed.map((candidate, index) => `${index + 1}. *${formatSlot(candidate, timezone)}*`).join('\n')
     : 'No slots are currently available.';
   const slotOptions = proposed.map((slot, index) => ({
-    text: { type: 'plain_text', text: formatSlotButton(slot, index) },
+    text: { type: 'plain_text', text: formatSlotButton(slot, index, timezone) },
     value: schedulingActionValue(request.id, slot.id),
   }));
   return [
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: `☕ *Random Coffee scheduling*\nSelect every time that works for you (1–3 options):\n${slotText}` },
+      text: { type: 'mrkdwn', text: `☕ *Random Coffee scheduling*\n${partnerText}${explanationText}Times shown in your Slack timezone: *${timezone}*\nSelect every time that works for you (1–3 options):\n${slotText}` },
+    },
+    {
+      type: 'input',
+      block_id: `schedule_slot_choices:${request.id}`,
+      label: { type: 'plain_text', text: 'Times that work for you' },
+      optional: true,
+      element: {
+        type: 'checkboxes',
+        action_id: ACTION_SCHEDULE_SLOT_CHOICES,
+        options: slotOptions,
+      },
     },
     {
       type: 'actions',
-      block_id: `schedule_slot_choices:${request.id}`,
       elements: [
-        {
-          type: 'checkboxes',
-          action_id: ACTION_SCHEDULE_SLOT_CHOICES,
-          options: slotOptions,
-        },
         {
           type: 'button',
           style: 'primary',
@@ -79,12 +86,14 @@ export function schedulingProposalBlocks(request: SchedulingRequest, slots: Sche
   ];
 }
 
-export function schedulingManualBlocks(request: SchedulingRequest): unknown[] {
-  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee manual mode*\nThis pair will arrange the meeting directly in Slack. I will not create a calendar event for this match, but normal coffee reminders will continue.` } }];
+export function schedulingManualBlocks(request: SchedulingRequest, slot?: SchedulingCandidateSlot | null, partnerUserId?: string | null, timezone = 'UTC'): unknown[] {
+  const partnerText = partnerUserId ? `Coffee match: <@${partnerUserId}>\n` : '';
+  const slotText = slot ? `\n*Agreed time:* ${formatSlot(slot, timezone)}\nPlease create/forward a calendar event manually for this time.` : '';
+  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee manual mode*\n${partnerText}This pair will arrange the meeting directly in Slack. I could not create the Google Calendar event automatically.${slotText}` } }];
 }
 
-export function schedulingBookedBlocks(slot: SchedulingCandidateSlot | null): unknown[] {
-  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee booked*\nCalendar event created for *${formatSlot(slot)}*.` } }];
+export function schedulingBookedBlocks(slot: SchedulingCandidateSlot | null, timezone = 'UTC'): unknown[] {
+  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee booked*\nCalendar event created for *${formatSlot(slot, timezone)}*.` } }];
 }
 
 export function schedulingFailedBlocks(text: string): unknown[] {

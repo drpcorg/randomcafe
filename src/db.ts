@@ -243,6 +243,12 @@ CREATE INDEX IF NOT EXISTS idx_scheduling_responses_request ON scheduling_respon
 CREATE INDEX IF NOT EXISTS idx_scheduling_notifications_due ON scheduling_notification_jobs(status, next_attempt_at);
 `,
   },
+  {
+    version: 3,
+    sql: `
+ALTER TABLE scheduling_preferences ADD COLUMN preferred_weekdays_json TEXT NOT NULL DEFAULT '[1,2,3,4,5]';
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {
@@ -376,6 +382,17 @@ function mapInviteAddress(row: Record<string, unknown>): VerifiedInviteAddress {
   };
 }
 
+function parsePreferredWeekdays(value: unknown): number[] {
+  try {
+    const parsed = JSON.parse(String(value ?? '[1,2,3,4,5]'));
+    if (!Array.isArray(parsed)) return [1, 2, 3, 4, 5];
+    const days = parsed.map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+    return days.length > 0 ? [...new Set(days)] : [1, 2, 3, 4, 5];
+  } catch {
+    return [1, 2, 3, 4, 5];
+  }
+}
+
 function mapPreference(row: Record<string, unknown>): SchedulingPreference {
   return {
     slackUserId: String(row.slack_user_id),
@@ -384,6 +401,7 @@ function mapPreference(row: Record<string, unknown>): SchedulingPreference {
     minNoticeHours: Number(row.min_notice_hours),
     preferredStart: String(row.preferred_start),
     preferredEnd: String(row.preferred_end),
+    preferredWeekdays: parsePreferredWeekdays(row.preferred_weekdays_json),
     automatedSchedulingEnabled: Boolean(Number(row.automated_scheduling_enabled)),
     updatedAt: String(row.updated_at),
   };
@@ -743,18 +761,19 @@ export class CafeRepository {
     this.db
       .prepare(
         `INSERT INTO scheduling_preferences
-          (slack_user_id, duration_minutes, search_horizon_days, min_notice_hours, preferred_start, preferred_end, automated_scheduling_enabled, updated_at)
-         VALUES (@slackUserId, @durationMinutes, @searchHorizonDays, @minNoticeHours, @preferredStart, @preferredEnd, @enabled, @timestamp)
+          (slack_user_id, duration_minutes, search_horizon_days, min_notice_hours, preferred_start, preferred_end, preferred_weekdays_json, automated_scheduling_enabled, updated_at)
+         VALUES (@slackUserId, @durationMinutes, @searchHorizonDays, @minNoticeHours, @preferredStart, @preferredEnd, @preferredWeekdaysJson, @enabled, @timestamp)
          ON CONFLICT(slack_user_id) DO UPDATE SET
           duration_minutes = excluded.duration_minutes,
           search_horizon_days = excluded.search_horizon_days,
           min_notice_hours = excluded.min_notice_hours,
           preferred_start = excluded.preferred_start,
           preferred_end = excluded.preferred_end,
+          preferred_weekdays_json = excluded.preferred_weekdays_json,
           automated_scheduling_enabled = excluded.automated_scheduling_enabled,
           updated_at = excluded.updated_at`,
       )
-      .run({ ...preference, enabled: preference.automatedSchedulingEnabled ? 1 : 0, timestamp });
+      .run({ ...preference, preferredWeekdaysJson: JSON.stringify(preference.preferredWeekdays), enabled: preference.automatedSchedulingEnabled ? 1 : 0, timestamp });
     return this.getSchedulingPreference(preference.slackUserId)!;
   }
 
@@ -810,8 +829,10 @@ export class CafeRepository {
     this.db.prepare('UPDATE scheduling_requests SET status = ?, selected_slot_id = ?, error = NULL, updated_at = ? WHERE id = ?').run('proposed', selectedSlotId ?? null, timestamp, requestId);
   }
 
-  markSchedulingManual(requestId: number, reason: string | null = null, timestamp = nowIso()): void {
-    this.db.prepare('UPDATE scheduling_requests SET status = ?, error = ?, updated_at = ? WHERE id = ? AND status NOT IN (?, ?, ?, ?)').run('manual', reason, timestamp, requestId, 'manual', 'booked', 'failed', 'expired');
+  markSchedulingManual(requestId: number, reason: string | null = null, timestamp = nowIso(), selectedSlotId?: string | null): void {
+    this.db
+      .prepare('UPDATE scheduling_requests SET status = ?, error = ?, selected_slot_id = COALESCE(?, selected_slot_id), updated_at = ? WHERE id = ? AND status NOT IN (?, ?, ?, ?)')
+      .run('manual', reason, selectedSlotId ?? null, timestamp, requestId, 'manual', 'booked', 'failed', 'expired');
   }
 
   markSchedulingBooked(requestId: number, slotId: string, providerEventId: string, providerEventUrl: string | null = null, timestamp = nowIso()): void {
@@ -933,6 +954,18 @@ export class CafeRepository {
 
   markSchedulingNotificationSent(jobId: number, slackChannelId: string, slackTs: string, timestamp = nowIso()): void {
     this.db.prepare('UPDATE scheduling_notification_jobs SET status = ?, attempts = attempts + 1, sent_at = ?, slack_channel_id = ?, slack_ts = ?, error = NULL WHERE id = ?').run('sent', timestamp, slackChannelId, slackTs, jobId);
+  }
+
+  findLatestSentSchedulingNotificationJob(params: { requestId: number; userId: string; type: SchedulingNotificationType }): SchedulingNotificationJob | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM scheduling_notification_jobs
+         WHERE request_id = ? AND user_id = ? AND type = ? AND status = ? AND slack_channel_id IS NOT NULL AND slack_ts IS NOT NULL
+         ORDER BY sent_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(params.requestId, params.userId, params.type, 'sent') as Record<string, unknown> | undefined;
+    return row ? mapSchedulingNotification(row) : null;
   }
 
   markSchedulingNotificationFailed(jobId: number, error: string, nextAttemptAt: string): void {

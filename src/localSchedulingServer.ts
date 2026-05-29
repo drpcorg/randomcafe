@@ -40,6 +40,13 @@ function envInt(name: string, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function envNonNegativeInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function localRuntimeConfig(): RuntimeConfig {
   return {
     slackBotToken: 'xoxb-local-test',
@@ -56,7 +63,7 @@ function localRuntimeConfig(): RuntimeConfig {
     calendarProvider: 'fake',
     calendarDefaultDurationMinutes: envInt('CALENDAR_DEFAULT_DURATION_MINUTES', 30),
     calendarSearchHorizonDays: envInt('CALENDAR_SEARCH_HORIZON_DAYS', 7),
-    calendarMinimumNoticeHours: envInt('CALENDAR_MINIMUM_NOTICE_HOURS', 24),
+    calendarMinimumNoticeHours: envNonNegativeInt('CALENDAR_MINIMUM_NOTICE_HOURS', 0),
     calendarDefaultPreferredStart: process.env.CALENDAR_DEFAULT_PREFERRED_START ?? '10:00',
     calendarDefaultPreferredEnd: process.env.CALENDAR_DEFAULT_PREFERRED_END ?? '17:00',
     calendarAgentFallbackMode: process.env.CALENDAR_AGENT_FALLBACK_MODE === 'failed' ? 'failed' : 'manual',
@@ -789,7 +796,7 @@ function renderUser(userId) {
       '<div><label>Duration</label><input id="' + userId + '-duration" value="' + escapeAttr(pref.durationMinutes || 30) + '"></div>' +
       '<div><label>Horizon days</label><input id="' + userId + '-horizon" value="' + escapeAttr(pref.searchHorizonDays || 7) + '"></div>' +
     '</div>' +
-    '<label>Minimum notice hours</label><input id="' + userId + '-notice" value="' + escapeAttr(pref.minNoticeHours ?? 24) + '">' +
+    '<label>Minimum notice hours</label><input id="' + userId + '-notice" value="' + escapeAttr(pref.minNoticeHours ?? 0) + '">' +
     '<div class="row" style="margin-top:10px"><button class="secondary" data-action="save-prefs" data-user="' + userId + '">Save prefs + replan</button></div>' +
     renderWeekCalendar(userId) +
     '<label>Proposed slots</label>' + renderProposalChoices(userId) +

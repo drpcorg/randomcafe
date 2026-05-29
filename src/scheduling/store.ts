@@ -25,7 +25,7 @@ export interface SchedulingStore {
   getSchedulingRequestByMatch(matchId: number): SchedulingRequest | null;
   listSchedulingRequestsByStatus(statuses: SchedulingStatus[], limit?: number): SchedulingRequest[];
   markSchedulingProposed(requestId: number, selectedSlotId?: string | null, timestamp?: string): void;
-  markSchedulingManual(requestId: number, reason?: string | null, timestamp?: string): void;
+  markSchedulingManual(requestId: number, reason?: string | null, timestamp?: string, selectedSlotId?: string | null): void;
   markSchedulingBooked(requestId: number, slotId: string, providerEventId: string, providerEventUrl?: string | null, timestamp?: string): void;
   markSchedulingFailed(requestId: number, reason: string, timestamp?: string): void;
   expireSchedulingForMatch(matchId: number, timestamp?: string): void;

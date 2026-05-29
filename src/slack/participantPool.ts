@@ -7,7 +7,7 @@ export interface SlackWebClientLike {
     info(args: { channel: string }): Promise<{ ok?: boolean }>;
   };
   users: {
-    info(args: { user: string }): Promise<{ user?: { id?: string; name?: string; real_name?: string; profile?: { email?: string }; is_bot?: boolean; deleted?: boolean } }>;
+    info(args: { user: string }): Promise<{ user?: { id?: string; name?: string; real_name?: string; tz?: string; tz_label?: string; tz_offset?: number; profile?: { email?: string }; is_bot?: boolean; deleted?: boolean } }>;
   };
 }
 
@@ -45,6 +45,9 @@ export async function fetchSlackUser(client: SlackWebClientLike, userId: string)
     name: user.name,
     realName: user.real_name,
     email: user.profile?.email,
+    timezone: user.tz,
+    timezoneLabel: user.tz_label,
+    timezoneOffset: user.tz_offset,
     isBot: user.is_bot,
     deleted: user.deleted,
   };

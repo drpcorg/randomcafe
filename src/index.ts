@@ -21,7 +21,7 @@ if (runtimeConfig.calendarSchedulingEnabled) {
   schedulingCoordinator = new SchedulingCoordinator(repository, runtimeConfig, calendarService, logger);
 }
 
-const app = createSlackApp(repository, runtimeConfig, logger, schedulingCoordinator);
+const app = createSlackApp(repository, runtimeConfig, logger, schedulingCoordinator, calendarService);
 const scheduler = new CafeScheduler(app.client as any, repository, logger, runtimeConfig.schedulerIntervalSeconds * 1000, schedulingCoordinator);
 
 let shuttingDown = false;

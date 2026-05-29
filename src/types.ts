@@ -57,6 +57,9 @@ export interface SlackUser {
   name?: string;
   realName?: string;
   email?: string;
+  timezone?: string;
+  timezoneLabel?: string;
+  timezoneOffset?: number;
   isBot?: boolean;
   deleted?: boolean;
 }
@@ -165,6 +168,7 @@ export interface SchedulingPreference {
   minNoticeHours: number;
   preferredStart: string;
   preferredEnd: string;
+  preferredWeekdays: number[];
   automatedSchedulingEnabled: boolean;
   updatedAt: string;
 }

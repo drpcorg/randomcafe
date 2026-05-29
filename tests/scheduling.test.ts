@@ -277,8 +277,8 @@ describe('scheduling Slack notifications', () => {
     expect(client.chat.postMessage).toHaveBeenCalledTimes(2);
     const proposed = repository.listCandidateSlots(request.id, 'active');
     const blocks = schedulingProposalBlocks(request, proposed);
-    const actions = (blocks[1] as any).elements;
-    const choices = actions.find((item: any) => item.type === 'checkboxes');
+    const choices = (blocks[1] as any).element;
+    const actions = (blocks[2] as any).elements;
     const confirm = actions.find((item: any) => item.action_id === ACTION_SCHEDULE_ACCEPT);
     expect(choices.options).toHaveLength(Math.min(3, proposed.length));
     expect(parseSchedulingActionValue(choices.options[0].value)).toEqual({ requestId: request.id, slotId: proposed[0]!.id });
