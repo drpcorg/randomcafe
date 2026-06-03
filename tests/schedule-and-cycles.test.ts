@@ -87,6 +87,43 @@ describe('cycle processing', () => {
     db.close();
   });
 
+  it('creates a new due cycle after the admin changes the schedule start', async () => {
+    const { db, repository } = makeRepository();
+    repository.saveConfig({
+      coffeeChannelId: 'C0123456789',
+      firstPairingLocal: '2026-05-29T12:17',
+      frequency: 'weekly',
+      timezone: 'Europe/Berlin',
+      reminderDelayDays: 3,
+      maxParticipants: 200,
+      matchCandidateAttempts: 200,
+      maxRemindersPerMatch: 2,
+    });
+
+    const client = mockSlackClient(['U1', 'U2']);
+    const logger = createLogger('silent');
+
+    await processDueCycles(client, repository, logger, '2026-05-29T10:17:00Z');
+    repository.saveConfig({
+      coffeeChannelId: 'C0123456789',
+      firstPairingLocal: '2026-06-03T18:10',
+      frequency: 'weekly',
+      timezone: 'Europe/Paris',
+      reminderDelayDays: 3,
+      maxParticipants: 200,
+      matchCandidateAttempts: 200,
+      maxRemindersPerMatch: 2,
+    });
+
+    const result = await processDueCycles(client, repository, logger, '2026-06-03T16:10:00Z');
+    const latestCycle = repository.getLastCycle()!;
+
+    expect(result.created).toBe(1);
+    expect(latestCycle.sequence).toBe(2);
+    expect(latestCycle.scheduledAt).toBe('2026-06-03T16:10:00Z');
+    db.close();
+  });
+
   it('expires active matches from the prior cycle when a new cycle starts', async () => {
     const { db, repository } = makeRepository();
     repository.saveConfig({

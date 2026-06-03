@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import { CafeRepository, nowIso } from './db.js';
 import { planMatches } from './matcher.js';
-import { dueScheduledTimes } from './schedule.js';
+import { scheduledAtForSequence } from './schedule.js';
 import type { AppConfig, CycleRecord } from './types.js';
 import { ParticipantPoolError, resolveParticipantPool, type SlackWebClientLike } from './slack/participantPool.js';
 import { createPairNotificationJobs, scheduleFirstReminder } from './slack/notifications.js';
@@ -79,6 +79,25 @@ export async function createCycleForSchedule(
   });
 }
 
+function dueUncreatedScheduledTimes(
+  repository: CafeRepository,
+  config: Pick<AppConfig, 'firstPairingLocal' | 'timezone' | 'frequency'>,
+  timestamp: string,
+  maxCount = 10,
+  maxScheduleOccurrences = 1000,
+): Array<{ scheduledAt: string }> {
+  const due: Array<{ scheduledAt: string }> = [];
+  const nowMs = Date.parse(timestamp);
+
+  for (let scheduleSequence = 1; due.length < maxCount && scheduleSequence <= maxScheduleOccurrences; scheduleSequence += 1) {
+    const scheduledAt = scheduledAtForSequence(config, scheduleSequence);
+    if (Date.parse(scheduledAt) > nowMs) break;
+    if (!repository.getCycleByScheduledAt(scheduledAt)) due.push({ scheduledAt });
+  }
+
+  return due;
+}
+
 export async function processDueCycles(
   client: CycleProcessorClient,
   repository: CafeRepository,
@@ -90,15 +109,20 @@ export async function processDueCycles(
   if (!config) return { created: 0, skippedExisting: 0, failed: 0 };
 
   const lastCycle = repository.getLastCycle();
-  const due = dueScheduledTimes(config, lastCycle?.sequence ?? 0, timestamp);
+  const due = dueUncreatedScheduledTimes(repository, config, timestamp);
   const result: ProcessDueCyclesResult = { created: 0, skippedExisting: 0, failed: 0 };
+  let nextCycleSequence = (lastCycle?.sequence ?? 0) + 1;
 
   for (const item of due) {
     try {
-      const created = await createCycleForSchedule(client, repository, config, item.scheduledAt, item.sequence, logger, schedulingCoordinator);
+      const created = await createCycleForSchedule(client, repository, config, item.scheduledAt, nextCycleSequence, logger, schedulingCoordinator);
       if (!created) {
         result.skippedExisting += 1;
-      } else if (created.status === 'failed') {
+        continue;
+      }
+
+      nextCycleSequence += 1;
+      if (created.status === 'failed') {
         result.failed += 1;
       } else {
         result.created += 1;
