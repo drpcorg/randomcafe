@@ -92,8 +92,9 @@ export function schedulingManualBlocks(request: SchedulingRequest, slot?: Schedu
   return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee manual mode*\n${partnerText}This pair will arrange the meeting directly in Slack. I could not create the Google Calendar event automatically.${slotText}` } }];
 }
 
-export function schedulingBookedBlocks(slot: SchedulingCandidateSlot | null, timezone = 'UTC'): unknown[] {
-  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee booked*\nCalendar event created for *${formatSlot(slot, timezone)}*.` } }];
+export function schedulingBookedBlocks(slot: SchedulingCandidateSlot | null, timezone = 'UTC', eventUrl?: string | null): unknown[] {
+  const linkText = eventUrl ? `\n<${eventUrl}|Open calendar event>` : '';
+  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee booked*\nCalendar event created for *${formatSlot(slot, timezone)}*.${linkText}` } }];
 }
 
 export function schedulingFailedBlocks(text: string): unknown[] {

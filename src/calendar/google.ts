@@ -120,6 +120,7 @@ export class GoogleCalendarService extends RepositoryBackedCalendarService {
     try {
       const response = await this.eventCalendar.events.insert({
         calendarId: this.config.calendarBotCalendarId,
+        sendUpdates: 'all',
         requestBody: {
           id: eventId,
           summary: input.summary,

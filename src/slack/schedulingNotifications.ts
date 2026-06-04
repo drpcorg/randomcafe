@@ -75,7 +75,7 @@ async function blocksForJob(client: SlackSchedulingNotificationClientLike, job: 
     return schedulingProposalBlocks(request, proposed, partnerUserId, timezone, explanation);
   }
   if (job.type === 'manual') return schedulingManualBlocks(request, selected, partnerUserId, timezone);
-  if (job.type === 'booked') return schedulingBookedBlocks(selected, timezone);
+  if (job.type === 'booked') return schedulingBookedBlocks(selected, timezone, request.providerEventUrl);
   if (job.type === 'no_slots') return schedulingFailedBlocks('☕ I could not find a shared slot yet. You can suggest preferences or choose manual mode.');
   return schedulingFailedBlocks('☕ Automated scheduling is unavailable for this coffee match. Please arrange directly; reminders will continue.');
 }
