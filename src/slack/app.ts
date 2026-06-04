@@ -4,7 +4,7 @@ import { isAdmin } from '../config.js';
 import { defaultSchedulingPreference, type CalendarService } from '../calendar/service.js';
 import type { CafeRepository } from '../db.js';
 import { recordFeedbackAndUpdateMatch } from '../feedback.js';
-import type { RuntimeConfig } from '../types.js';
+import type { RuntimeConfig, SchedulingRequest } from '../types.js';
 import type { SchedulingCoordinator } from '../scheduling.js';
 import { feedbackRecordedBlocks } from './messages.js';
 import {
@@ -100,6 +100,22 @@ function selectedSchedulingSlotIdsFromState(body: any, requestId: number): strin
     }
   }
   return [...new Set(slotIds)];
+}
+
+function isTerminalSchedulingRequest(request: SchedulingRequest | null): boolean {
+  return request?.status === 'booked' || request?.status === 'manual' || request?.status === 'failed' || request?.status === 'expired';
+}
+
+function inactiveSchedulingRequestText(request: SchedulingRequest | null): string {
+  if (!request) return '⚠️ *This scheduling proposal is no longer active.*\nPlease use the latest Random Coffee message.';
+  if (request.status === 'booked') {
+    const linkText = request.providerEventUrl ? `\n<${request.providerEventUrl}|Open calendar event>` : '';
+    return `✅ *This proposal is no longer active.*\nThe meeting has already been booked.${linkText}`;
+  }
+  if (request.status === 'manual') return '🤝 *This proposal is no longer active.*\nManual mode is enabled for this coffee match.';
+  if (request.status === 'failed') return '⚠️ *This proposal is no longer active.*\nAutomated scheduling is unavailable for this coffee match.';
+  if (request.status === 'expired') return '⌛ *This proposal is no longer active.*\nThis coffee match is no longer open.';
+  return '🔁 *This proposal is no longer active.*\nPlease use the latest proposed times below.';
 }
 
 async function deliverQueuedSchedulingUpdates(client: any, repository: CafeRepository, logger: Logger): Promise<void> {
@@ -262,18 +278,27 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
     const userId = slackUserIdFromBody(body);
     const value = parseSchedulingActionValue(action.value);
     if (!userId || !value || !schedulingCoordinator) return;
+    const request = repository.getSchedulingRequest(value.requestId);
+    if (isTerminalSchedulingRequest(request)) {
+      await updateSchedulingInteractionMessage(client, body, inactiveSchedulingRequestText(request), respond);
+      rememberSelectedSlots(value.requestId, userId, []);
+      return;
+    }
+
     const slotIds = selectedSchedulingSlotIdsFromState(body, value.requestId);
     const rememberedSlotIds = selectedSlotsByUserAndRequest.get(selectionKey(value.requestId, userId)) ?? [];
     // Prefer the latest checkbox action we observed for this user/request.
     // Slack can include stale checkbox state in the subsequent button payload
     // when the user clicks Confirm immediately after changing selections.
     const chosenSlotIds = rememberedSlotIds.length > 0 ? rememberedSlotIds : slotIds;
+    const activeChosenSlotIds = chosenSlotIds.filter((slotId) => repository.getCandidateSlot(value.requestId, slotId)?.status === 'active');
     logger.info({
       requestId: value.requestId,
       userId,
       slotIdsFromState: slotIds,
       rememberedSlotIds,
       chosenSlotIds,
+      activeChosenSlotIds,
       stateBlockIds: Object.keys(body?.state?.values ?? {}),
       actionValue: action?.value,
       messageTs: body?.message?.ts,
@@ -284,6 +309,12 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
       if (respond) await respond({ replace_original: false, text: 'Please select at least one proposed slot first.' });
       return;
     }
+    if (activeChosenSlotIds.length === 0) {
+      logger.warn({ requestId: value.requestId, userId, chosenSlotIds }, 'Confirm clicked with no active scheduling slots');
+      await updateSchedulingInteractionMessage(client, body, inactiveSchedulingRequestText(request), respond);
+      rememberSelectedSlots(value.requestId, userId, []);
+      return;
+    }
     const interactionKey = `accept:${value.requestId}:${userId}:${body?.message?.ts ?? 'unknown'}`;
     if (!claimInteraction(interactionKey)) {
       logger.info({ requestId: value.requestId, userId, interactionKey }, 'Ignoring duplicate scheduling accept interaction');
@@ -291,18 +322,18 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
     }
 
     try {
-      await updateSchedulingInteractionMessage(client, body, schedulingSelectionSavedText(chosenSlotIds.length), respond);
+      await updateSchedulingInteractionMessage(client, body, schedulingSelectionSavedText(activeChosenSlotIds.length), respond);
     } catch (error) {
       logger.warn({ err: error, requestId: value.requestId, userId }, 'Could not update scheduling proposal message after selection');
     }
 
     runAfterAck(logger, 'scheduling accept interaction', async () => {
       try {
-        await schedulingCoordinator.handleParticipantResponse({ requestId: value.requestId, slotIds: chosenSlotIds, userId, response: 'accepted' });
+        await schedulingCoordinator.handleParticipantResponse({ requestId: value.requestId, slotIds: activeChosenSlotIds, userId, response: 'accepted' });
         rememberSelectedSlots(value.requestId, userId, []);
         await deliverQueuedSchedulingUpdates(client, repository, logger);
       } catch (error) {
-        logger.error({ err: error, requestId: value.requestId, userId, chosenSlotIds }, 'Failed to handle selected scheduling slots');
+        logger.error({ err: error, requestId: value.requestId, userId, chosenSlotIds, activeChosenSlotIds }, 'Failed to handle selected scheduling slots');
         releaseInteraction(interactionKey);
         const errorText = `⚠️ *Selection saved locally, but I hit an error while processing it.*\n${error instanceof Error ? error.message : String(error)}`;
         try {
@@ -319,6 +350,12 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
     const userId = slackUserIdFromBody(body);
     const value = parseSchedulingActionValue(action.value);
     if (!userId || !value || !schedulingCoordinator) return;
+    const request = repository.getSchedulingRequest(value.requestId);
+    if (isTerminalSchedulingRequest(request)) {
+      await updateSchedulingInteractionMessage(client, body, inactiveSchedulingRequestText(request), respond);
+      rememberSelectedSlots(value.requestId, userId, []);
+      return;
+    }
     const interactionKey = `alternatives:${value.requestId}:${userId}:${body?.message?.ts ?? 'unknown'}`;
     if (!claimInteraction(interactionKey)) {
       logger.info({ requestId: value.requestId, userId, interactionKey }, 'Ignoring duplicate scheduling alternatives interaction');
@@ -342,6 +379,12 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
     const userId = slackUserIdFromBody(body);
     const value = parseSchedulingActionValue(action.value);
     if (!userId || !value || !schedulingCoordinator) return;
+    const request = repository.getSchedulingRequest(value.requestId);
+    if (isTerminalSchedulingRequest(request)) {
+      await updateSchedulingInteractionMessage(client, body, inactiveSchedulingRequestText(request), respond);
+      rememberSelectedSlots(value.requestId, userId, []);
+      return;
+    }
     const interactionKey = `manual:${value.requestId}:${userId}:${body?.message?.ts ?? 'unknown'}`;
     if (!claimInteraction(interactionKey)) {
       logger.info({ requestId: value.requestId, userId, interactionKey }, 'Ignoring duplicate scheduling manual interaction');
@@ -366,6 +409,12 @@ export function createSlackApp(repository: CafeRepository, runtimeConfig: Runtim
     const value = parseSchedulingActionValue(action.value);
     if (!value) {
       await ackPromise;
+      return;
+    }
+    const request = repository.getSchedulingRequest(value.requestId);
+    if (isTerminalSchedulingRequest(request)) {
+      await ackPromise;
+      await updateSchedulingInteractionMessage(client, body, inactiveSchedulingRequestText(request), respond);
       return;
     }
     const interactionKey = `suggest:${value.requestId}:${slackUserIdFromBody(body) ?? 'unknown'}:${body?.message?.ts ?? 'unknown'}`;

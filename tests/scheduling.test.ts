@@ -163,6 +163,21 @@ describe('scheduling repository and coordinator', () => {
     db.close();
   });
 
+  it('allows only one active planner claim per pending scheduling request', () => {
+    const { db, repository, match, coordinator } = setup();
+    const request = coordinator.createRequestForMatch(match)!;
+
+    const first = repository.claimSchedulingRequest(request.id, 'worker-1', '2026-06-01T08:00:00Z');
+    const second = repository.claimSchedulingRequest(request.id, 'worker-2', '2026-06-01T08:00:01Z');
+
+    expect(first?.id).toBe(request.id);
+    expect(second).toBeNull();
+
+    repository.releaseSchedulingRequestClaim(request.id, 'worker-1');
+    expect(repository.claimSchedulingRequest(request.id, 'worker-2', '2026-06-01T08:00:02Z')?.id).toBe(request.id);
+    db.close();
+  });
+
   it('books exactly one event after both participants accept the same active slot', async () => {
     const { db, repository, match, coordinator } = setup();
     connect(repository, 'U1');

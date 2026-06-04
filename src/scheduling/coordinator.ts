@@ -51,10 +51,18 @@ export class SchedulingCoordinator {
   async processPendingRequests(timestamp = nowIso()): Promise<number> {
     if (!this.config.calendarSchedulingEnabled) return 0;
     const requests = this.store.listSchedulingRequestsByStatus(['pending'], 100);
-    await mapWithConcurrency(requests, this.config.schedulingPlanningConcurrency, async (request) => {
-      await this.planRequest(request, 'initial', timestamp);
+    const processed = await mapWithConcurrency(requests, this.config.schedulingPlanningConcurrency, async (request) => {
+      const owner = `scheduler:${process.pid}:${dedupeSuffix()}`;
+      const claimed = this.store.claimSchedulingRequest(request.id, owner, timestamp);
+      if (!claimed) return 0;
+      try {
+        await this.planRequest(claimed, 'initial', timestamp);
+        return 1;
+      } finally {
+        this.store.releaseSchedulingRequestClaim(request.id, owner);
+      }
     });
-    return requests.length;
+    return processed.filter(Boolean).length;
   }
 
   async handleParticipantResponse(input: SchedulingResponseInput, timestamp = nowIso()): Promise<SchedulingRequest | null> {

@@ -24,6 +24,8 @@ export interface SchedulingStore {
   getSchedulingRequest(requestId: number): SchedulingRequest | null;
   getSchedulingRequestByMatch(matchId: number): SchedulingRequest | null;
   listSchedulingRequestsByStatus(statuses: SchedulingStatus[], limit?: number): SchedulingRequest[];
+  claimSchedulingRequest(requestId: number, owner: string, timestamp?: string, ttlMs?: number): SchedulingRequest | null;
+  releaseSchedulingRequestClaim(requestId: number, owner: string): void;
   markSchedulingProposed(requestId: number, selectedSlotId?: string | null, timestamp?: string): void;
   markSchedulingManual(requestId: number, reason?: string | null, timestamp?: string, selectedSlotId?: string | null): void;
   markSchedulingBooked(requestId: number, slotId: string, providerEventId: string, providerEventUrl?: string | null, timestamp?: string): void;

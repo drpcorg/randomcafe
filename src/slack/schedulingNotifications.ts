@@ -95,16 +95,19 @@ function staleProposalText(job: SchedulingNotificationJob, repository: CafeRepos
   return '⚠️ *This proposal is no longer active.*\nAutomated scheduling is unavailable. See the update below.';
 }
 
-async function deactivateLatestProposal(client: SlackSchedulingNotificationClientLike, repository: CafeRepository, job: SchedulingNotificationJob): Promise<void> {
+async function deactivateSentProposals(client: SlackSchedulingNotificationClientLike, repository: CafeRepository, job: SchedulingNotificationJob): Promise<void> {
   if (!client.chat.update) return;
-  const proposal = repository.findLatestSentSchedulingNotificationJob({ requestId: job.requestId, userId: job.userId, type: 'proposal' });
-  if (!proposal?.slackChannelId || !proposal.slackTs) return;
+  const proposals = repository.listSentSchedulingNotificationJobs({ requestId: job.requestId, userId: job.userId, type: 'proposal' });
+  if (proposals.length === 0) return;
   const text = staleProposalText(job, repository);
-  await client.chat.update({ channel: proposal.slackChannelId, ts: proposal.slackTs, text, blocks: sectionBlocks(text) });
+  for (const proposal of proposals) {
+    if (!proposal.slackChannelId || !proposal.slackTs) continue;
+    await client.chat.update({ channel: proposal.slackChannelId, ts: proposal.slackTs, text, blocks: sectionBlocks(text) });
+  }
 }
 
 export async function sendSchedulingNotificationJob(client: SlackSchedulingNotificationClientLike, repository: CafeRepository, job: SchedulingNotificationJob): Promise<void> {
-  await deactivateLatestProposal(client, repository, job);
+  await deactivateSentProposals(client, repository, job);
 
   const text = textForSchedulingJob(job, repository);
   const blocks = await blocksForJob(client, job, repository);

@@ -249,6 +249,18 @@ CREATE INDEX IF NOT EXISTS idx_scheduling_notifications_due ON scheduling_notifi
 ALTER TABLE scheduling_preferences ADD COLUMN preferred_weekdays_json TEXT NOT NULL DEFAULT '[1,2,3,4,5]';
 `,
   },
+  {
+    version: 4,
+    sql: `
+CREATE TABLE IF NOT EXISTS scheduling_request_claims (
+  request_id INTEGER PRIMARY KEY REFERENCES scheduling_requests(id) ON DELETE CASCADE,
+  owner TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduling_request_claims_expires ON scheduling_request_claims(expires_at);
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {
@@ -810,6 +822,27 @@ export class CafeRepository {
     return rows.map(mapSchedulingRequest);
   }
 
+  claimSchedulingRequest(requestId: number, owner: string, timestamp = nowIso(), ttlMs = 5 * 60 * 1000): SchedulingRequest | null {
+    const expiresAt = new Date(Date.parse(timestamp) + ttlMs).toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT INTO scheduling_request_claims (request_id, owner, claimed_at, expires_at)
+         SELECT ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM scheduling_requests WHERE id = ? AND status = 'pending')
+         ON CONFLICT(request_id) DO UPDATE SET
+           owner = excluded.owner,
+           claimed_at = excluded.claimed_at,
+           expires_at = excluded.expires_at
+         WHERE scheduling_request_claims.expires_at <= ?`,
+      )
+      .run(requestId, owner, timestamp, expiresAt, requestId, timestamp);
+    return result.changes > 0 ? this.getSchedulingRequest(requestId) : null;
+  }
+
+  releaseSchedulingRequestClaim(requestId: number, owner: string): void {
+    this.db.prepare('DELETE FROM scheduling_request_claims WHERE request_id = ? AND owner = ?').run(requestId, owner);
+  }
+
   updateSchedulingRequestStatus(requestId: number, status: SchedulingStatus, options: { error?: string | null; selectedSlotId?: string | null; providerEventId?: string | null; providerEventUrl?: string | null } = {}, timestamp = nowIso()): void {
     this.db
       .prepare(
@@ -956,16 +989,15 @@ export class CafeRepository {
     this.db.prepare('UPDATE scheduling_notification_jobs SET status = ?, attempts = attempts + 1, sent_at = ?, slack_channel_id = ?, slack_ts = ?, error = NULL WHERE id = ?').run('sent', timestamp, slackChannelId, slackTs, jobId);
   }
 
-  findLatestSentSchedulingNotificationJob(params: { requestId: number; userId: string; type: SchedulingNotificationType }): SchedulingNotificationJob | null {
-    const row = this.db
+  listSentSchedulingNotificationJobs(params: { requestId: number; userId: string; type: SchedulingNotificationType }): SchedulingNotificationJob[] {
+    const rows = this.db
       .prepare(
         `SELECT * FROM scheduling_notification_jobs
          WHERE request_id = ? AND user_id = ? AND type = ? AND status = ? AND slack_channel_id IS NOT NULL AND slack_ts IS NOT NULL
-         ORDER BY sent_at DESC, id DESC
-         LIMIT 1`,
+         ORDER BY sent_at ASC, id ASC`,
       )
-      .get(params.requestId, params.userId, params.type, 'sent') as Record<string, unknown> | undefined;
-    return row ? mapSchedulingNotification(row) : null;
+      .all(params.requestId, params.userId, params.type, 'sent') as Record<string, unknown>[];
+    return rows.map(mapSchedulingNotification);
   }
 
   markSchedulingNotificationFailed(jobId: number, error: string, nextAttemptAt: string): void {
