@@ -36,10 +36,13 @@ function formatSlotButton(slot: SchedulingCandidateSlot, index: number, timezone
   return `✅ ${index + 1}. ${starts}`;
 }
 
-export function schedulingProposalBlocks(request: SchedulingRequest, slots: SchedulingCandidateSlot[], partnerUserId?: string | null, timezone = 'UTC', explanation?: string | null): unknown[] {
+export function schedulingProposalBlocks(request: SchedulingRequest, slots: SchedulingCandidateSlot[], partnerUserId?: string | null, timezone = 'UTC', explanation?: string | null, calendarWarning?: string | null): unknown[] {
   const proposed = slots.slice(0, 3);
-  const partnerText = partnerUserId ? `Your coffee match: <@${partnerUserId}>\n` : '';
-  const explanationText = explanation?.trim() ? `_${explanation.trim()}_\n` : '';
+  const partnerText = partnerUserId ? `Your coffee match: <@${partnerUserId}>
+` : '';
+  const explanationText = explanation?.trim() ? `_${explanation.trim()}_
+` : '';
+  const calendarWarningText = calendarWarning?.trim() ? `\n⚠️ ${calendarWarning.trim()}\n` : '';
   const slotText = proposed.length > 0
     ? proposed.map((candidate, index) => `${index + 1}. *${formatSlot(candidate, timezone)}*`).join('\n')
     : 'No slots are currently available.';
@@ -50,7 +53,10 @@ export function schedulingProposalBlocks(request: SchedulingRequest, slots: Sche
   return [
     {
       type: 'section',
-      text: { type: 'mrkdwn', text: `☕ *Random Coffee scheduling*\n${partnerText}${explanationText}Times shown in your Slack timezone: *${timezone}*\nSelect every time that works for you (1–3 options):\n${slotText}` },
+      text: { type: 'mrkdwn', text: `☕ *Random Coffee scheduling*
+${partnerText}${explanationText}${calendarWarningText}Times shown in your Slack timezone: *${timezone}*
+Select every time that works for you (1–3 options):
+${slotText}` },
     },
     {
       type: 'input',
@@ -97,6 +103,11 @@ export function schedulingBookedBlocks(slot: SchedulingCandidateSlot | null, tim
   return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee booked*\nCalendar event created for *${formatSlot(slot, timezone)}*.${linkText}` } }];
 }
 
+export function schedulingStartingBlocks(partnerUserId?: string | null): unknown[] {
+  const partnerText = partnerUserId ? `\nYour coffee match: <@${partnerUserId}>` : '';
+  return [{ type: 'section', text: { type: 'mrkdwn', text: `☕ *Random Coffee starts now*${partnerText}` } }];
+}
+
 export function schedulingFailedBlocks(text: string): unknown[] {
   return [{ type: 'section', text: { type: 'mrkdwn', text } }];
 }
@@ -138,6 +149,7 @@ export function textForSchedulingJob(job: SchedulingNotificationJob, repository:
   if (!request) return 'Random Coffee scheduling update.';
   if (job.type === 'manual') return 'Random Coffee: this pair will arrange the meeting manually.';
   if (job.type === 'booked') return 'Random Coffee: calendar event created.';
+  if (job.type === 'starting') return 'Random Coffee starts now.';
   if (job.type === 'failed') return 'Random Coffee: automated scheduling is unavailable.';
   if (job.type === 'no_slots') return 'Random Coffee: I could not find a shared slot yet.';
   return 'Random Coffee: suggested meeting time.';

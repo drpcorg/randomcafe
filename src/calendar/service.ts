@@ -94,9 +94,9 @@ function overlapsBusy(startsAt: DateTime, endsAt: DateTime, busy: BusyInterval[]
 
 export interface SlotSearchInput extends FindCalendarSlotsInput {
   busyByUser: Map<string, BusyInterval[]>;
+  calendarErrors?: Map<string, string>;
   maxResults?: number;
 }
-
 export function generateSharedSlots(input: SlotSearchInput): Array<Omit<SchedulingCandidateSlot, 'requestId' | 'createdAt' | 'status'>> {
   const now = DateTime.fromISO(input.now ?? new Date().toISOString(), { zone: 'utc' });
   const preferences = input.participants.map((participant) => participant.preference);
@@ -140,8 +140,9 @@ export function generateSharedSlots(input: SlotSearchInput): Array<Omit<Scheduli
       const startsIso = starts.toISO({ suppressMilliseconds: true })!;
       const endsIso = ends.toISO({ suppressMilliseconds: true })!;
       const score = dayOffset * 10 + Math.abs(cursor.hour - 11);
-      const reasons = ['available for opted-in calendars', `${durationMinutes} minutes`, `within ${input.timezone} preferred window`];
+      const reasons: string[] = ['available for opted-in calendars', `${durationMinutes} minutes`, `within ${input.timezone} preferred window`];
       if (input.participants.some((participant) => !participant.identity || !participant.preference.automatedSchedulingEnabled)) reasons.push('one participant calendar not checked');
+      if (input.calendarErrors && input.calendarErrors.size > 0) reasons.push('some participants calendar unavailable; slots may overlap with busy times');
       slots.push({ id: slotIdFor(input.requestId, startsIso, endsIso), startsAt: startsIso, endsAt: endsIso, score, reasons });
     }
   }

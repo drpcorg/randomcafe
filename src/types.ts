@@ -11,7 +11,7 @@ export type SchedulingStatus = 'pending' | 'proposed' | 'manual' | 'booked' | 'f
 export type SchedulingSlotStatus = 'active' | 'inactive' | 'booked';
 export type SchedulingResponseType = 'accepted' | 'rejected' | 'alternatives' | 'text_preference' | 'manual';
 export type SchedulingMessageRole = 'system' | 'user' | 'assistant' | 'tool';
-export type SchedulingNotificationType = 'proposal' | 'manual' | 'booked' | 'failed' | 'no_slots';
+export type SchedulingNotificationType = 'proposal' | 'manual' | 'booked' | 'failed' | 'no_slots' | 'starting';
 
 export interface AppConfig {
   coffeeChannelId: string;

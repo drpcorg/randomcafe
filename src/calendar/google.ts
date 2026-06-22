@@ -52,17 +52,18 @@ export class GoogleCalendarService extends RepositoryBackedCalendarService {
   }
 
   async findBusyIntervals(input: FindCalendarBusyInput): Promise<Map<string, BusyInterval[]>> {
-    return this.busyIntervals(input);
+    const { byUser } = await this.busyIntervals(input);
+    return byUser;
   }
 
-  private async busyIntervals(input: FindCalendarBusyInput): Promise<Map<string, BusyInterval[]>> {
+  private async busyIntervals(input: FindCalendarBusyInput): Promise<{ byUser: Map<string, BusyInterval[]>; errors: Map<string, string> }> {
     const config = this.repository.getConfig();
     const now = new Date(input.now ?? new Date().toISOString());
     const horizonDays = input.horizonDays ?? Math.max(...input.participants.map((participant) => participant.preference.searchHorizonDays));
     const timeMin = now.toISOString();
     const timeMax = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000).toISOString();
     const optedIn = input.participants.filter((participant) => participant.identity && participant.preference.automatedSchedulingEnabled);
-    if (optedIn.length === 0) return new Map();
+    if (optedIn.length === 0) return { byUser: new Map(), errors: new Map() };
 
     const requestBody = {
       timeMin,
@@ -84,28 +85,38 @@ export class GoogleCalendarService extends RepositoryBackedCalendarService {
 
     const calendars = response.data.calendars ?? {};
     const byUser = new Map<string, BusyInterval[]>();
+    const calendarErrors = new Map<string, string>();
     for (const participant of optedIn) {
       const key = participant.identity!.calendarId || participant.identity!.calendarEmail;
       const calendar = calendars[key];
       const errors = calendar?.errors ?? [];
       if (errors.length > 0) {
         const reasons = errors.map((error) => [error.reason, error.domain].filter(Boolean).join('/')).filter(Boolean).join(', ');
-        throw new Error(`Google free/busy failed for ${key}: ${reasons || 'unknown error'}`);
+        this.logger?.warn({ slackUserId: participant.slackUserId, key, reasons }, 'Google free/busy returned errors for participant; treating as fully available');
+        calendarErrors.set(participant.slackUserId, `Google free/busy returned errors: ${reasons || 'unknown error'}`);
+        byUser.set(participant.slackUserId, []);
+        continue;
       }
-      if (!calendar) throw new Error(`Google free/busy did not return calendar ${key}`);
+      if (!calendar) {
+        this.logger?.warn({ slackUserId: participant.slackUserId, key }, 'Google free/busy did not return calendar for participant; treating as fully available');
+        calendarErrors.set(participant.slackUserId, `Google free/busy did not return calendar ${key}`);
+        byUser.set(participant.slackUserId, []);
+        continue;
+      }
       const busy = calendar.busy ?? [];
       byUser.set(participant.slackUserId, busy.map((item) => ({ startsAt: item.start!, endsAt: item.end! })).filter((item) => item.startsAt && item.endsAt));
     }
-    return byUser;
+    return { byUser, errors: calendarErrors };
   }
 
+
   async findSharedSlots(input: FindCalendarSlotsInput): Promise<Array<Omit<SchedulingCandidateSlot, 'requestId' | 'createdAt' | 'status'>>> {
-    const busyByUser = await this.busyIntervals(input);
-    return generateSharedSlots({ ...input, busyByUser });
+    const { byUser, errors } = await this.busyIntervals(input);
+    return generateSharedSlots({ ...input, busyByUser: byUser, calendarErrors: errors });
   }
 
   async revalidateSlot(input: RevalidateSlotInput): Promise<boolean> {
-    const busyByUser = await this.busyIntervals({
+    const { byUser: busyByUser } = await this.busyIntervals({
       participants: input.participants,
       timezone: this.repository.getConfig()?.timezone ?? 'UTC',
       now: new Date(Date.parse(input.slot.startsAt) - 1).toISOString(),

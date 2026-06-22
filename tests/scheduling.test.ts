@@ -194,6 +194,8 @@ describe('scheduling repository and coordinator', () => {
     expect(booked.status).toBe('booked');
     expect(booked.providerEventId).toContain('fake_');
     expect(repository.listDueSchedulingNotificationJobs('2026-06-01T09:02:00Z').filter((job) => job.type === 'booked')).toHaveLength(2);
+    expect(repository.listDueSchedulingNotificationJobs('2026-06-01T09:02:00Z').filter((job) => job.type === 'starting')).toHaveLength(0);
+    expect(repository.listDueSchedulingNotificationJobs(slot.startsAt).filter((job) => job.type === 'starting')).toHaveLength(2);
     db.close();
   });
 
@@ -298,6 +300,30 @@ describe('scheduling Slack notifications', () => {
     expect(choices.options).toHaveLength(Math.min(3, proposed.length));
     expect(parseSchedulingActionValue(choices.options[0].value)).toEqual({ requestId: request.id, slotId: proposed[0]!.id });
     expect(parseSchedulingActionValue(confirm.value)).toEqual({ requestId: request.id, slotId: null });
+    db.close();
+  });
+
+  it('sends meeting-start notifications without interactive controls', async () => {
+    const { db, repository, match, coordinator } = setup();
+    connect(repository, 'U1');
+    connect(repository, 'U2');
+    const request = coordinator.createRequestForMatch(match)!;
+    const [slot] = createProposedSlots(repository, request.id, 1);
+    repository.markSchedulingBooked(request.id, slot.id, 'fake_event', null, '2026-06-01T09:00:00Z');
+    repository.createSchedulingNotificationJob({ type: 'starting', requestId: request.id, userId: 'U1', slotId: slot.id, dedupeKey: `starting:${request.id}:${slot.id}:U1`, nextAttemptAt: slot.startsAt, createdAt: '2026-06-01T09:00:00Z' });
+
+    const client = {
+      conversations: { open: vi.fn(async ({ users }: { users: string }) => ({ channel: { id: `D${users}` } })) },
+      chat: { postMessage: vi.fn(async () => ({ channel: 'D1', ts: '1.2' })) },
+    };
+    await processSchedulingNotificationJobs(client, repository, createLogger('silent'), slot.startsAt);
+
+    expect(client.chat.postMessage).toHaveBeenCalledTimes(1);
+    const message = (client.chat.postMessage as any).mock.calls[0][0] as any;
+    expect(message.text).toBe('Random Coffee starts now.');
+    expect(message.blocks).toHaveLength(1);
+    expect(JSON.stringify(message.blocks)).toContain('<@U2>');
+    expect(JSON.stringify(message.blocks)).not.toContain('button');
     db.close();
   });
 });

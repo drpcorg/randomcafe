@@ -261,6 +261,65 @@ CREATE TABLE IF NOT EXISTS scheduling_request_claims (
 CREATE INDEX IF NOT EXISTS idx_scheduling_request_claims_expires ON scheduling_request_claims(expires_at);
 `,
   },
+  {
+    version: 5,
+    sql: `
+CREATE TABLE IF NOT EXISTS scheduling_notification_jobs_new (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL CHECK (type IN ('proposal', 'manual', 'booked', 'failed', 'no_slots', 'starting')),
+  request_id INTEGER NOT NULL REFERENCES scheduling_requests(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL,
+  slot_id TEXT REFERENCES scheduling_candidate_slots(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT NOT NULL,
+  sent_at TEXT,
+  slack_channel_id TEXT,
+  slack_ts TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO scheduling_notification_jobs_new (
+  id, dedupe_key, type, request_id, user_id, slot_id, status, attempts, next_attempt_at,
+  sent_at, slack_channel_id, slack_ts, error, created_at
+)
+SELECT
+  id, dedupe_key, type, request_id, user_id, slot_id, status, attempts, next_attempt_at,
+  sent_at, slack_channel_id, slack_ts, error, created_at
+FROM scheduling_notification_jobs;
+
+DROP TABLE scheduling_notification_jobs;
+ALTER TABLE scheduling_notification_jobs_new RENAME TO scheduling_notification_jobs;
+CREATE INDEX IF NOT EXISTS idx_scheduling_notifications_due ON scheduling_notification_jobs(status, next_attempt_at);
+
+INSERT OR IGNORE INTO scheduling_notification_jobs (
+  dedupe_key, type, request_id, user_id, slot_id, status, attempts, next_attempt_at, created_at
+)
+SELECT
+  'starting:' || sr.id || ':' || sr.selected_slot_id || ':' || users.user_id,
+  'starting',
+  sr.id,
+  users.user_id,
+  sr.selected_slot_id,
+  'pending',
+  0,
+  sc.starts_at,
+  strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+FROM scheduling_requests sr
+JOIN matches m ON m.id = sr.match_id
+JOIN scheduling_candidate_slots sc ON sc.id = sr.selected_slot_id
+JOIN (
+  SELECT id AS match_id, user_a AS user_id FROM matches
+  UNION ALL
+  SELECT id AS match_id, user_b AS user_id FROM matches
+) users ON users.match_id = m.id
+WHERE sr.status = 'booked'
+  AND sr.selected_slot_id IS NOT NULL
+  AND julianday(sc.starts_at) > julianday('now');
+`,
+  },
 ];
 
 export function migrate(db: SqliteDatabase): void {
@@ -547,8 +606,22 @@ export class CafeRepository {
     return row ? mapCycle(row) : null;
   }
 
+  getLastCompletedCycle(): CycleRecord | null {
+    const row = this.db.prepare("SELECT * FROM cycles WHERE status = 'completed' ORDER BY sequence DESC LIMIT 1").get() as Record<string, unknown> | undefined;
+    return row ? mapCycle(row) : null;
+  }
+
   getCycleByScheduledAt(scheduledAt: string): CycleRecord | null {
-    const row = this.db.prepare('SELECT * FROM cycles WHERE scheduled_at = ?').get(scheduledAt) as Record<string, unknown> | undefined;
+    const row = this.db
+      .prepare(
+        `SELECT * FROM cycles
+         WHERE scheduled_at = @scheduledAt
+            OR (strftime('%Y-%m-%dT%H:%M:%SZ', scheduled_at) = strftime('%Y-%m-%dT%H:%M:%SZ', @scheduledAt)
+                AND strftime('%Y-%m-%dT%H:%M:%SZ', @scheduledAt) IS NOT NULL)
+         ORDER BY id DESC
+         LIMIT 1`,
+      )
+      .get({ scheduledAt }) as Record<string, unknown> | undefined;
     return row ? mapCycle(row) : null;
   }
 

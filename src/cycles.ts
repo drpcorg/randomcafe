@@ -1,7 +1,7 @@
 import type { Logger } from 'pino';
 import { CafeRepository, nowIso } from './db.js';
 import { planMatches } from './matcher.js';
-import { scheduledAtForSequence } from './schedule.js';
+import { addDaysUtc, scheduledAtForSequence } from './schedule.js';
 import type { AppConfig, CycleRecord } from './types.js';
 import { ParticipantPoolError, resolveParticipantPool, type SlackWebClientLike } from './slack/participantPool.js';
 import { createPairNotificationJobs, scheduleFirstReminder } from './slack/notifications.js';
@@ -87,12 +87,36 @@ function dueUncreatedScheduledTimes(
   maxScheduleOccurrences = 1000,
 ): Array<{ scheduledAt: string }> {
   const due: Array<{ scheduledAt: string }> = [];
+  const dueEpochMs = new Set<number>();
   const nowMs = Date.parse(timestamp);
 
+  const addIfUncreated = (scheduledAt: string): void => {
+    const scheduledMs = Date.parse(scheduledAt);
+    if (Number.isNaN(scheduledMs) || scheduledMs > nowMs || dueEpochMs.has(scheduledMs)) return;
+    if (repository.getCycleByScheduledAt(scheduledAt)) return;
+    due.push({ scheduledAt });
+    dueEpochMs.add(scheduledMs);
+  };
+
+  const lastCycle = repository.getLastCycle();
+  if (lastCycle) {
+    const lastScheduledMs = Date.parse(lastCycle.scheduledAt);
+    const intervalDays = config.frequency === 'weekly' ? 7 : 14;
+
+    let nextScheduledAt = addDaysUtc(lastCycle.scheduledAt, intervalDays);
+    while (due.length < maxCount && Date.parse(nextScheduledAt) <= nowMs) {
+      addIfUncreated(nextScheduledAt);
+      nextScheduledAt = addDaysUtc(nextScheduledAt, intervalDays);
+    }
+
+    return due;
+  }
+
+  // No cycles yet: fall back to firstPairingLocal.
   for (let scheduleSequence = 1; due.length < maxCount && scheduleSequence <= maxScheduleOccurrences; scheduleSequence += 1) {
     const scheduledAt = scheduledAtForSequence(config, scheduleSequence);
+    addIfUncreated(scheduledAt);
     if (Date.parse(scheduledAt) > nowMs) break;
-    if (!repository.getCycleByScheduledAt(scheduledAt)) due.push({ scheduledAt });
   }
 
   return due;

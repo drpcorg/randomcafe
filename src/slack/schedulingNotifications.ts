@@ -3,7 +3,7 @@ import type { CafeRepository } from '../db.js';
 import type { SchedulingNotificationJob } from '../types.js';
 import { retryDelayMs, type SlackMessageClientLike } from './notifications.js';
 import type { SlackWebClientLike } from './participantPool.js';
-import { schedulingBookedBlocks, schedulingFailedBlocks, schedulingManualBlocks, schedulingProposalBlocks, textForSchedulingJob } from './schedulingMessages.js';
+import { schedulingBookedBlocks, schedulingFailedBlocks, schedulingManualBlocks, schedulingProposalBlocks, schedulingStartingBlocks, textForSchedulingJob } from './schedulingMessages.js';
 
 export interface SlackSchedulingNotificationClientLike extends SlackMessageClientLike {
   users?: SlackWebClientLike['users'];
@@ -72,10 +72,15 @@ async function blocksForJob(client: SlackSchedulingNotificationClientLike, job: 
   if (job.type === 'proposal') {
     const proposed = repository.listCandidateSlots(request.id, 'active').slice(0, 3);
     const explanation = repository.listSchedulingMessages(request.id).filter((message) => message.role === 'assistant').at(-1)?.content ?? null;
-    return schedulingProposalBlocks(request, proposed, partnerUserId, timezone, explanation);
+    const calendarUnavailable = proposed.some((slot) => slot.reasons?.some((r) => r.includes('calendar unavailable')));
+    const calendarWarning = calendarUnavailable
+      ? 'Some participants have not shared their Google Calendar with Cafe yet. Slots may overlap with busy times. Open the Home tab and follow the instructions to share your calendar (See only free/busy).'
+      : null;
+    return schedulingProposalBlocks(request, proposed, partnerUserId, timezone, explanation, calendarWarning);
   }
   if (job.type === 'manual') return schedulingManualBlocks(request, selected, partnerUserId, timezone);
   if (job.type === 'booked') return schedulingBookedBlocks(selected, timezone, request.providerEventUrl);
+  if (job.type === 'starting') return schedulingStartingBlocks(partnerUserId);
   if (job.type === 'no_slots') return schedulingFailedBlocks('☕ I could not find a shared slot yet. You can suggest preferences or choose manual mode.');
   return schedulingFailedBlocks('☕ Automated scheduling is unavailable for this coffee match. Please arrange directly; reminders will continue.');
 }
@@ -107,7 +112,7 @@ async function deactivateSentProposals(client: SlackSchedulingNotificationClient
 }
 
 export async function sendSchedulingNotificationJob(client: SlackSchedulingNotificationClientLike, repository: CafeRepository, job: SchedulingNotificationJob): Promise<void> {
-  await deactivateSentProposals(client, repository, job);
+  if (job.type !== 'starting') await deactivateSentProposals(client, repository, job);
 
   const text = textForSchedulingJob(job, repository);
   const blocks = await blocksForJob(client, job, repository);

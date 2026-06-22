@@ -87,7 +87,7 @@ describe('cycle processing', () => {
     db.close();
   });
 
-  it('creates a new due cycle after the admin changes the schedule start', async () => {
+  it('anchors due cycles from the last actual cycle after the admin changes the schedule start', async () => {
     const { db, repository } = makeRepository();
     repository.saveConfig({
       coffeeChannelId: 'C0123456789',
@@ -115,12 +115,14 @@ describe('cycle processing', () => {
       maxRemindersPerMatch: 2,
     });
 
-    const result = await processDueCycles(client, repository, logger, '2026-06-03T16:10:00Z');
+    const earlyResult = await processDueCycles(client, repository, logger, '2026-06-03T16:10:00Z');
+    const result = await processDueCycles(client, repository, logger, '2026-06-05T10:17:00Z');
     const latestCycle = repository.getLastCycle()!;
 
+    expect(earlyResult.created).toBe(0);
     expect(result.created).toBe(1);
     expect(latestCycle.sequence).toBe(2);
-    expect(latestCycle.scheduledAt).toBe('2026-06-03T16:10:00Z');
+    expect(latestCycle.scheduledAt).toBe('2026-06-05T10:17:00Z');
     db.close();
   });
 
@@ -144,8 +146,11 @@ describe('cycle processing', () => {
     const firstCycle = repository.getLastCycle()!;
     const firstMatch = repository.listMatchesForCycle(firstCycle.id)[0]!;
     await processDueCycles(client, repository, logger, '2026-06-10T08:00:00Z');
+    const secondCycle = repository.getLastCycle()!;
 
     expect(repository.getMatch(firstMatch.id)!.outcome).toBe('expired');
+    expect(secondCycle.scheduledAt).toBe('2026-06-10T08:00:00Z');
+    expect(repository.getCycleByScheduledAt('2026-06-10T08:00:00.000Z')!.id).toBe(secondCycle.id);
     db.close();
   });
 });

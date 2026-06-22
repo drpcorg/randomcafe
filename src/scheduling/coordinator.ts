@@ -72,7 +72,7 @@ export class SchedulingCoordinator {
     if (input.response === 'manual') {
       this.store.recordSchedulingResponse({ requestId: input.requestId, slackUserId: input.userId, response: 'manual', text: input.text ?? null }, timestamp);
       this.store.markSchedulingManual(input.requestId, 'Participant chose manual mode', timestamp);
-      await this.notifyParticipants(input.requestId, 'manual', null, `manual:${input.requestId}:${dedupeSuffix()}`);
+      await this.notifyParticipants(input.requestId, 'manual', null, `manual:${input.requestId}:${dedupeSuffix()}`, timestamp);
       return this.store.getSchedulingRequest(input.requestId);
     }
 
@@ -141,7 +141,7 @@ export class SchedulingCoordinator {
     const optedIn = profiles.filter((profile) => profile.identity && profile.preference.automatedSchedulingEnabled);
     if (optedIn.length === 0) {
       this.store.markSchedulingManual(request.id, 'No participants opted into automated calendar scheduling', timestamp);
-      await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:no-opt-in`);
+      await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:no-opt-in`, timestamp);
       return;
     }
 
@@ -150,12 +150,12 @@ export class SchedulingCoordinator {
     const slots = await this.calendar.findSharedSlots({ requestId: request.id, participants: profiles, timezone, now: timestamp, rejectedSlotIds: rejected });
     if (slots.length === 0 && this.config.calendarAgentFallbackMode === 'failed') {
       this.store.markSchedulingFailed(request.id, 'No shared slots found', timestamp);
-      await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:no-slots`);
+      await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:no-slots`, timestamp);
       return;
     }
     if (slots.length === 0) {
       this.store.markSchedulingProposed(request.id, null, timestamp);
-      await this.notifyParticipants(request.id, 'no_slots', null, `no-slots:${request.id}:${dedupeSuffix()}`);
+      await this.notifyParticipants(request.id, 'no_slots', null, `no-slots:${request.id}:${dedupeSuffix()}`, timestamp);
       return;
     }
 
@@ -168,10 +168,10 @@ export class SchedulingCoordinator {
     } catch (error) {
       if (this.config.calendarAgentFallbackMode === 'failed') {
         this.store.markSchedulingFailed(request.id, `Pi scheduling agent unavailable: ${error instanceof Error ? error.message : String(error)}`, timestamp);
-        await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:agent`);
+        await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:agent`, timestamp);
       } else {
         this.store.markSchedulingManual(request.id, `Pi scheduling agent unavailable: ${error instanceof Error ? error.message : String(error)}`, timestamp);
-        await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:agent`);
+        await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:agent`, timestamp);
       }
       return;
     }
@@ -179,7 +179,7 @@ export class SchedulingCoordinator {
     this.store.markSlotsInactiveExcept(request.id, proposedSlotIds, timestamp);
     this.store.addSchedulingMessage(request.id, 'assistant', recommendation.message, timestamp);
     this.store.markSchedulingProposed(request.id, null, timestamp);
-    await this.notifyParticipants(request.id, 'proposal', null, `proposal:${request.id}:${proposedSlotIds.join(',')}:${dedupeSuffix()}`);
+    await this.notifyParticipants(request.id, 'proposal', null, `proposal:${request.id}:${proposedSlotIds.join(',')}:${dedupeSuffix()}`, timestamp);
     this.logger.info({ requestId: request.id, reason, proposedSlotIds }, 'Created scheduling proposal');
   }
 
@@ -241,7 +241,7 @@ export class SchedulingCoordinator {
     const profiles = await this.participantProfiles(match);
     if (profiles.some((profile) => !profile.inviteAddress)) {
       this.store.markSchedulingManual(request.id, 'Missing verified invite address', timestamp);
-      await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:missing-invite`);
+      await this.notifyParticipants(request.id, 'manual', null, `manual:${request.id}:missing-invite`, timestamp);
       return;
     }
     const available = await this.calendar.revalidateSlot({ requestId: request.id, slot, participants: profiles });
@@ -263,21 +263,36 @@ export class SchedulingCoordinator {
       this.logger.error({ err: error, requestId: request.id, slotId: slot.id }, 'Calendar event creation failed after overlapping slot acceptance');
       if (this.config.calendarAgentFallbackMode === 'failed') {
         this.store.markSchedulingFailed(request.id, message, timestamp);
-        await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:event-create:${dedupeSuffix()}`);
+        await this.notifyParticipants(request.id, 'failed', null, `failed:${request.id}:event-create:${dedupeSuffix()}`, timestamp);
       } else {
         this.store.markSchedulingManual(request.id, message, timestamp, slot.id);
-        await this.notifyParticipants(request.id, 'manual', slot.id, `manual:${request.id}:event-create:${dedupeSuffix()}`);
+        await this.notifyParticipants(request.id, 'manual', slot.id, `manual:${request.id}:event-create:${dedupeSuffix()}`, timestamp);
       }
       return;
     }
     this.store.markSchedulingBooked(request.id, slot.id, event.providerEventId, event.providerEventUrl ?? null, timestamp);
-    await this.notifyParticipants(request.id, 'booked', slot.id, `booked:${request.id}:${slot.id}`);
+    this.queueMeetingStartNotifications(request, match, slot, timestamp);
+    await this.notifyParticipants(request.id, 'booked', slot.id, `booked:${request.id}:${slot.id}`, timestamp);
   }
 
-  private async notifyParticipants(requestId: number, type: SchedulingNotificationType, slotId: string | null, dedupeKeyPrefix: string): Promise<void> {
+  private queueMeetingStartNotifications(request: SchedulingRequest, match: MatchRecord, slot: SchedulingCandidateSlot, timestamp = nowIso()): void {
+    for (const userId of [match.userA, match.userB]) {
+      this.store.createSchedulingNotificationJob({
+        type: 'starting',
+        requestId: request.id,
+        userId,
+        slotId: slot.id,
+        dedupeKey: `starting:${request.id}:${slot.id}:${userId}`,
+        nextAttemptAt: slot.startsAt,
+        createdAt: timestamp,
+      });
+    }
+  }
+
+  private async notifyParticipants(requestId: number, type: SchedulingNotificationType, slotId: string | null, dedupeKeyPrefix: string, timestamp = nowIso()): Promise<void> {
     const request = this.store.getSchedulingRequest(requestId);
     const match = request ? this.store.getMatch(request.matchId) : null;
     if (!request || !match) return;
-    await this.environment.notifyParticipants({ request, match, type, slotId, dedupeKeyPrefix });
+    await this.environment.notifyParticipants({ request, match, type, slotId, dedupeKeyPrefix, nextAttemptAt: timestamp, createdAt: timestamp });
   }
 }

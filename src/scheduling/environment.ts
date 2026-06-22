@@ -7,6 +7,8 @@ export interface SchedulingNotificationEnvelope {
   type: SchedulingNotificationType;
   slotId: string | null;
   dedupeKeyPrefix: string;
+  nextAttemptAt?: string;
+  createdAt?: string;
 }
 
 export interface SchedulingEnvironment {
@@ -24,6 +26,8 @@ export class RepositorySchedulingEnvironment implements SchedulingEnvironment {
         userId,
         slotId: envelope.slotId,
         dedupeKey: `${envelope.dedupeKeyPrefix}:${userId}`,
+        nextAttemptAt: envelope.nextAttemptAt,
+        createdAt: envelope.createdAt,
       });
     }
   }
