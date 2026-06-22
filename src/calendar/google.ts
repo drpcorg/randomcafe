@@ -9,6 +9,14 @@ function googleEventId(requestId: number, slotId: string): string {
   return `cafe${crypto.createHash('sha256').update(`${requestId}:${slotId}`).digest('hex').slice(0, 24)}`;
 }
 
+const eventReminders = {
+  useDefault: false,
+  overrides: [
+    { method: 'popup', minutes: 30 },
+    { method: 'popup', minutes: 0 },
+  ],
+};
+
 export class GoogleCalendarService extends RepositoryBackedCalendarService {
   private readonly freeBusyCalendar;
   private readonly fallbackFreeBusyCalendar;
@@ -128,6 +136,7 @@ export class GoogleCalendarService extends RepositoryBackedCalendarService {
           start: { dateTime: input.slot.startsAt },
           end: { dateTime: input.slot.endsAt },
           attendees,
+          reminders: eventReminders,
         },
       });
       return { providerEventId: response.data.id ?? eventId, providerEventUrl: response.data.htmlLink ?? null };
